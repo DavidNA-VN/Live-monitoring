@@ -1,12 +1,23 @@
 __pycache__/
 *.pyc
+*.pyo
+*.log
 
 .pytest_cache/
+.pytest-tmp-*/
 .venv/
+.env
+.env.*
+.coverage
+htmlcov/
+.idea/
+.vscode/
 
 hls_output/
 outputs/
 reports/
+hls_test_black/
+live_hls/
 
 video_splitter/
 source_videos/
@@ -15,5 +26,16 @@ ffmpeg-*.tar.xz
 *.mp4
 *.ts
 *.m3u8
+
+# Internal planning, code mapping, generated documents and experiments.
+plan/
+src/code_context/
+code_context_markdown/
+notes/
+code-test/
+docs/
+tools/
+*.docx
+*.xlsx
 
 ~$*
