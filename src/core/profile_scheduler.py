@@ -1,5 +1,6 @@
 import logging
-from threading import Lock
+from collections.abc import Mapping
+from threading import BoundedSemaphore, Lock
 
 from core.analysis_profile import AnalysisProfile, AnalysisResourceClass
 from core.bounded_executor import BoundedExecutor
@@ -20,13 +21,13 @@ from core.segment_admission import (
 from core.segment_processor import SegmentProcessor
 from core.segment_state import RedisSegmentStateStore
 from models.playlist_snapshot import MediaPlaylistSnapshot
+from models.analysis import ResourcePoolLimit
 from models.processing import (
     SegmentProcessingIdentity,
     SegmentProcessingRecord,
     SegmentProcessingStatus,
 )
 from models.runtime import LiveCycleStats
-from models.segment import Segment
 from models.stream import StreamIdentity
 
 
@@ -43,8 +44,11 @@ class ProfileScheduler:
         state_store: RedisSegmentStateStore,
         processors: list[SegmentProcessor],
         analysis_profiles: list[AnalysisProfile],
-        max_workers: int,
-        max_pending_tasks: int,
+        resource_limits: Mapping[
+            AnalysisResourceClass,
+            ResourcePoolLimit,
+        ],
+        max_concurrent_media_processes: int,
         max_admitted_work: int = 2048,
         max_work_age_seconds: float = 120.0,
         max_segments_per_batch: int = 20,
@@ -53,6 +57,8 @@ class ProfileScheduler:
     ) -> None:
         if max_segments_per_batch <= 0:
             raise ValueError("max_segments_per_batch must be > 0")
+        if max_concurrent_media_processes <= 0:
+            raise ValueError("max_concurrent_media_processes must be > 0")
         self.stream = stream
         self.state_store = state_store
         self.profiles = {profile.name: profile for profile in analysis_profiles}
@@ -70,16 +76,31 @@ class ProfileScheduler:
             name: [] for name in self.profiles
         }
         self._register_processors(processors)
-        self.executors_by_resource = {
-            resource_class: BoundedExecutor(max_workers, max_pending_tasks)
-            for resource_class in set(self.resource_class_by_profile.values())
-        }
+        self.executors_by_resource = {}
+        for resource_class in set(self.resource_class_by_profile.values()):
+            try:
+                limit = resource_limits[resource_class]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Missing resource limit for {resource_class.value}"
+                ) from exc
+            self.executors_by_resource[resource_class] = BoundedExecutor(
+                limit.max_workers,
+                limit.max_pending_tasks,
+            )
         self.admission_queue = admission_queue or SegmentAdmissionQueue(
             max_items=max_admitted_work,
             max_age_seconds=max_work_age_seconds,
         )
         self.max_segments_per_batch = max_segments_per_batch
-        self.worker = ProfileWorkerCoordinator(state_store, metrics)
+        self.media_process_gate = BoundedSemaphore(
+            max_concurrent_media_processes
+        )
+        self.worker = ProfileWorkerCoordinator(
+            state_store,
+            metrics,
+            media_process_gate=self.media_process_gate,
+        )
         self.batch_lock = Lock()
         self.active_batches: set[tuple[str, str]] = set()
         self.dispatch_cursor = 0
@@ -178,8 +199,10 @@ class ProfileScheduler:
         ordered = sorted(
             items,
             key=lambda item: (
+                item.identity.timeline_generation,
                 item.identity.discontinuity_sequence,
                 item.identity.sequence,
+                item.identity.media_revision,
             ),
         )
         identities = []
@@ -188,7 +211,7 @@ class ProfileScheduler:
             for processor in processors:
                 if not processor.supports_segment(item.segment):
                     continue
-                identity = self._processing_identity(processor, item.segment)
+                identity = self._processing_identity(processor, item)
                 identities.append(identity)
                 candidates.setdefault(item.identity, []).append(
                     ProcessorSegmentWork(processor, identity)
@@ -275,14 +298,18 @@ class ProfileScheduler:
     def _processing_identity(
         self,
         processor: SegmentProcessor,
-        segment: Segment,
+        item: AdmittedProfileSegment,
     ) -> SegmentProcessingIdentity:
         return SegmentProcessingIdentity(
             stream_id=self.stream.stream_id,
             check_name=processor.name,
-            variant_stable_id=segment.variant_stable_id,
-            discontinuity_sequence=segment.discontinuity_sequence,
-            sequence=segment.sequence,
+            variant_stable_id=item.identity.variant_stable_id,
+            discontinuity_sequence=(
+                item.identity.discontinuity_sequence
+            ),
+            sequence=item.identity.sequence,
+            timeline_generation=item.identity.timeline_generation,
+            media_revision=item.identity.media_revision,
         )
 
     def _needs_processing(self, record: SegmentProcessingRecord) -> bool:

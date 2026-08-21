@@ -11,7 +11,8 @@ from core.redis_client import (
     RedisUnavailableError,
 )
 from core.redis_keys import (
-    RedisKeyBuilder,
+    AlertRedisKeys,
+    RuntimeRedisKeys,
 )
 from core.redis_scripts import PUBLISH_RUNTIME_HEALTH
 from models.runtime import (
@@ -26,7 +27,8 @@ class RedisRuntimeHealthReporter:
         self,
         stream_id: str,
         redis_client: RedisClient,
-        key_builder: RedisKeyBuilder | None = None,
+        runtime_keys: RuntimeRedisKeys | None = None,
+        alert_keys: AlertRedisKeys | None = None,
         health_ttl_seconds: int = 120,
         stream_max_length: int = 10_000,
     ):
@@ -37,9 +39,9 @@ class RedisRuntimeHealthReporter:
         self.stream_id = stream_id
         self.redis = redis_client.client
 
-        self.keys = (
-            key_builder
-            or RedisKeyBuilder()
+        self.runtime_keys = runtime_keys or RuntimeRedisKeys()
+        self.alert_keys = alert_keys or AlertRedisKeys(
+            self.runtime_keys.namespace
         )
 
         self.health_ttl_seconds = (
@@ -146,11 +148,11 @@ class RedisRuntimeHealthReporter:
         try:
             pipeline = self.redis.pipeline(transaction=True)
             pipeline.hset(
-                self.keys.runtime_metrics(self.stream_id),
+                self.runtime_keys.metrics(self.stream_id),
                 mapping=mapping,
             )
             pipeline.expire(
-                self.keys.runtime_metrics(self.stream_id),
+                self.runtime_keys.metrics(self.stream_id),
                 self.health_ttl_seconds,
             )
             pipeline.execute()
@@ -170,11 +172,11 @@ class RedisRuntimeHealthReporter:
             self.redis.eval(
                 PUBLISH_RUNTIME_HEALTH,
                 3,
-                self.keys.runtime_health(
+                self.runtime_keys.health(
                     self.stream_id
                 ),
-                self.keys.alert_outbox(),
-                self.keys.runtime_metrics(self.stream_id),
+                self.alert_keys.outbox(),
+                self.runtime_keys.metrics(self.stream_id),
                 payload,
                 self.health_ttl_seconds,
                 state,

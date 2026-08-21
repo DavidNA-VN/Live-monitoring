@@ -27,6 +27,16 @@ redis.call('DEL', KEYS[1])
 return 1
 """
 
+ADVANCE_TIMELINE_GENERATION = """
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local expected = tonumber(ARGV[1])
+if current == expected then
+    current = current + 1
+    redis.call('SET', KEYS[1], tostring(current))
+end
+return current
+"""
+
 PUBLISH_RUNTIME_HEALTH = """
 local previous = redis.call('GET', KEYS[1])
 if previous == ARGV[1] then

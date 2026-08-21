@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from models.evidence import EventEvidence
 
 class BlackEventStatus(
     str,
@@ -46,6 +45,6 @@ class BlackLiveEvent:
     long_alert_sent: bool = False
 
     resolution_reason: str | None = None
-    evidence: list[EventEvidence] = field(
-        default_factory=list
-    )
+    timeline_generation: int = 0
+    start_media_revision: str = ""
+    last_media_revision: str = ""

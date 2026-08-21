@@ -2,7 +2,6 @@ import json
 from datetime import datetime
 
 from models.black_live import BlackEventStatus, BlackLiveEvent
-from models.evidence import EventEvidence, EvidenceStrength
 
 
 class BlackEventCodec:
@@ -17,6 +16,9 @@ class BlackEventCodec:
                 "discontinuity_sequence": (
                     event.discontinuity_sequence
                 ),
+                "timeline_generation": event.timeline_generation,
+                "start_media_revision": event.start_media_revision,
+                "last_media_revision": event.last_media_revision,
                 "start_sequence": event.start_sequence,
                 "end_sequence": event.end_sequence,
                 "start_offset": event.start_offset,
@@ -39,15 +41,6 @@ class BlackEventCodec:
                 "status": event.status.value,
                 "long_alert_sent": event.long_alert_sent,
                 "resolution_reason": event.resolution_reason,
-                "evidence": [
-                    {
-                        "evidence_type": item.evidence_type,
-                        "strength": item.strength.value,
-                        "source": item.source,
-                        "detail": item.detail,
-                    }
-                    for item in event.evidence
-                ],
             },
             separators=(",", ":"),
         )
@@ -63,6 +56,9 @@ class BlackEventCodec:
             discontinuity_sequence=int(
                 data["discontinuity_sequence"]
             ),
+            timeline_generation=int(data.get("timeline_generation", 0)),
+            start_media_revision=data.get("start_media_revision", ""),
+            last_media_revision=data.get("last_media_revision", ""),
             start_sequence=int(data["start_sequence"]),
             end_sequence=int(data["end_sequence"]),
             start_offset=float(data["start_offset"]),
@@ -91,13 +87,4 @@ class BlackEventCodec:
             status=BlackEventStatus(data["status"]),
             long_alert_sent=bool(data["long_alert_sent"]),
             resolution_reason=data.get("resolution_reason"),
-            evidence=[
-                EventEvidence(
-                    evidence_type=item["evidence_type"],
-                    strength=EvidenceStrength(item["strength"]),
-                    source=item["source"],
-                    detail=item["detail"],
-                )
-                for item in data.get("evidence", [])
-            ],
         )

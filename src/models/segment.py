@@ -50,3 +50,7 @@ class Segment:
     init_section: MediaInitializationSection | None = None
     encryption: SegmentEncryption | None = None
     has_video: bool = True
+
+    # Assigned by PlaylistObservationTracker, not by the HLS parser.
+    timeline_generation: int = 0
+    media_revision: str = ""

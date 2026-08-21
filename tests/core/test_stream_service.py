@@ -9,6 +9,7 @@ from core.stream_session import (
 )
 from core.stream_supervisor import StreamSupervisor
 from models.stream_config import StreamConfig
+from models.analysis import AnalysisResourceClass, ResourcePoolLimit
 
 
 class BlockingRuntime:
@@ -29,7 +30,12 @@ def config(name, *, enabled=True, workers=1):
         master_url=f"https://test/{name}/master.m3u8",
         stream_id=name,
         enabled=enabled,
-        max_decode_workers=workers,
+        resource_limits={
+            AnalysisResourceClass.VIDEO_DECODE: ResourcePoolLimit(
+                workers,
+                0,
+            )
+        },
     )
 
 
@@ -123,7 +129,9 @@ def test_supervisor_add_pause_resume_update_remove_lifecycle():
 
     supervisor.update(stream_id, config("one", workers=2))
     assert len(factory.created) == 3
-    assert factory.created[-1].config.max_decode_workers == 2
+    assert factory.created[-1].config.resource_limits[
+        AnalysisResourceClass.VIDEO_DECODE
+    ].max_workers == 2
     assert supervisor.remove(stream_id) is True
     assert supervisor.snapshots() == {}
 
@@ -180,7 +188,9 @@ def test_update_preserves_paused_operational_state():
         StreamSessionStatus.PAUSED
     )
     supervisor.resume(stream_id)
-    assert factory.created[-1].config.max_decode_workers == 2
+    assert factory.created[-1].config.resource_limits[
+        AnalysisResourceClass.VIDEO_DECODE
+    ].max_workers == 2
 
 
 def test_stop_all_attempts_every_session_when_one_times_out():

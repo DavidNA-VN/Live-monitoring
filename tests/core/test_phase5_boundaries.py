@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from checks.black_screen.alert_publisher import BlackAlertPublisher
 from checks.black_screen.redis_scripts import (
     RELEASE_OWNED_LOCK as BLACK_RELEASE_LOCK,
-    WRITE_EVENT_EVIDENCE,
 )
 from core.live_polling import LivePlaylistPoller, calculate_poll_interval
 from core.redis_scripts import (
@@ -12,7 +11,7 @@ from core.redis_scripts import (
     RELEASE_OWNED_LOCK,
     RENEW_OWNED_LOCK,
 )
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import AlertRedisKeys, RedisNamespace, RuntimeRedisKeys
 from models.black_live import BlackLiveEvent
 from models.stream import StreamIdentity
 from tests.core.test_live_runtime_sliding_window import make_context
@@ -61,9 +60,11 @@ def black_event():
 
 def test_black_alert_mapping_has_no_redis_dependency():
     pipeline = RecordingPipeline()
+    namespace = RedisNamespace("test")
     publisher = BlackAlertPublisher(
         stream_id="stream-1",
-        key_builder=RedisKeyBuilder(prefix="test"),
+        alert_keys=AlertRedisKeys(namespace),
+        runtime_keys=RuntimeRedisKeys(namespace),
     )
 
     publisher.add_event(
@@ -84,9 +85,11 @@ def test_black_alert_mapping_has_no_redis_dependency():
 
 def test_black_alert_publisher_accepts_replaceable_sink():
     sink = RecordingAlertSink()
+    namespace = RedisNamespace("unused")
     publisher = BlackAlertPublisher(
         stream_id="stream-1",
-        key_builder=RedisKeyBuilder(prefix="unused"),
+        alert_keys=AlertRedisKeys(namespace),
+        runtime_keys=RuntimeRedisKeys(namespace),
         alert_sink=sink,
     )
 
@@ -142,7 +145,6 @@ def test_lua_scripts_have_explicit_module_ownership():
         COMPLETE_SEGMENT,
         PUBLISH_RUNTIME_HEALTH,
         BLACK_RELEASE_LOCK,
-        WRITE_EVENT_EVIDENCE,
     )
 
     assert all("redis.call" in script for script in scripts)

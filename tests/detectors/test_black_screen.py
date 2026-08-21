@@ -1,5 +1,6 @@
 from detectors.black_screen import BlackScreenDetector
 from models.analysis import (
+    AnalysisRequirement,
     SegmentAnalysisBundle,
     VideoRealtimeAnalysis,
 )
@@ -13,9 +14,11 @@ def test_detector_maps_video_analysis_to_black_result():
         profile_name="video_realtime",
         video_realtime=VideoRealtimeAnalysis(
             checked=True,
-            black_intervals=(
-                BlackInterval(start=1.0, end=3.0),
-            ),
+            outputs={
+                AnalysisRequirement.BLACK_INTERVALS: (
+                    BlackInterval(start=1.0, end=3.0),
+                )
+            },
         ),
     )
 
@@ -28,9 +31,7 @@ def test_detector_maps_video_analysis_to_black_result():
     assert result.sequence == segment.sequence
     assert result.variant_id == segment.variant_id
     assert result.segment_uri == segment.uri
-    assert result.black_intervals == list(
-        analysis.video_realtime.black_intervals
-    )
+    assert result.black_intervals == [BlackInterval(start=1.0, end=3.0)]
 
 
 def test_detector_maps_video_analysis_failure():

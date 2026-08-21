@@ -28,8 +28,10 @@ class SegmentProcessingIdentity:
     stream_id: str
     check_name: str
     variant_stable_id: str
+    timeline_generation: int
     discontinuity_sequence: int
     sequence: int
+    media_revision: str
 
 
 @dataclass(frozen=True)

@@ -176,7 +176,6 @@ class BlackEventReducer:
             affected_segments=list(
                 event.affected_segments
             ),
-            evidence=list(event.evidence),
         )
 
     def _resolve(
@@ -199,16 +198,18 @@ class BlackEventReducer:
         event: BlackLiveEvent,
         segment: Segment,
     ) -> bool:
+        if event.timeline_generation != segment.timeline_generation:
+            return False
+
         if (
             event.discontinuity_sequence
             != segment.discontinuity_sequence
         ):
             return False
 
-        return segment.sequence in (
-            event.end_sequence,
-            event.end_sequence + 1,
-        )
+        if segment.sequence == event.end_sequence:
+            return event.last_media_revision == segment.media_revision
+        return segment.sequence == event.end_sequence + 1
 
     def _can_continue(
         self,
@@ -217,6 +218,9 @@ class BlackEventReducer:
         segment: Segment,
         interval: BlackInterval,
     ) -> bool:
+        if event.timeline_generation != segment.timeline_generation:
+            return False
+
         if (
             event.discontinuity_sequence
             != segment.discontinuity_sequence
@@ -224,6 +228,8 @@ class BlackEventReducer:
             return False
 
         if segment.sequence == event.end_sequence:
+            if event.last_media_revision != segment.media_revision:
+                return False
             return (
                 interval.start
                 <= event.end_offset + self.boundary_tolerance
@@ -278,6 +284,9 @@ class BlackEventReducer:
             duration=interval.duration,
             last_segment_duration=segment.duration,
             affected_segments=[segment.sequence],
+            timeline_generation=segment.timeline_generation,
+            start_media_revision=segment.media_revision,
+            last_media_revision=segment.media_revision,
         )
 
     @staticmethod
@@ -306,6 +315,7 @@ class BlackEventReducer:
             )
         )
         event.last_segment_duration = segment.duration
+        event.last_media_revision = segment.media_revision
 
         if segment.sequence not in event.affected_segments:
             event.affected_segments.append(segment.sequence)
@@ -330,8 +340,10 @@ class BlackEventReducer:
         raw = (
             f"{self.stream_id}|"
             f"{segment.variant_stable_id}|"
+            f"{segment.timeline_generation}|"
             f"{segment.discontinuity_sequence}|"
             f"{segment.sequence}|"
+            f"{segment.media_revision}|"
             f"{start_offset:.6f}"
         )
         return hashlib.sha256(

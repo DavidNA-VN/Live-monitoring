@@ -5,6 +5,7 @@ from checks.black_screen.processor import (
 )
 from core.segment_processor import SegmentProcessOutcome
 from models.analysis import (
+    AnalysisRequirement,
     SegmentAnalysisBundle,
     VideoRealtimeAnalysis,
 )
@@ -33,7 +34,9 @@ def bundle(
             checked=checked,
             error=error,
             retryable=retryable,
-            black_intervals=tuple(intervals),
+            outputs={
+                AnalysisRequirement.BLACK_INTERVALS: tuple(intervals)
+            },
         ),
     )
 

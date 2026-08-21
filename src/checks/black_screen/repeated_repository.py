@@ -10,7 +10,7 @@ from checks.black_screen.repeated_reducer import (
 )
 from checks.black_screen.alert_publisher import BlackAlertPublisher
 from core.redis_client import RedisUnavailableError
-from core.redis_keys import RedisKeyBuilder
+from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from models.black_live import BlackLiveEvent
 from models.segment import Segment
 from policies.black_screen import BlackScreenAlertPolicy
@@ -23,23 +23,20 @@ class RedisRepeatedBlackRepository:
         stream_id: str,
         redis_client,
         policy: BlackScreenAlertPolicy,
-        key_builder: RedisKeyBuilder,
+        black_keys: BlackScreenRedisKeys,
         event_ttl_seconds: int,
         commit_ttl_seconds: int,
+        alert_publisher: BlackAlertPublisher,
         reducer: RepeatedBlackReducer | None = None,
-        alert_publisher: BlackAlertPublisher | None = None,
     ) -> None:
         self.stream_id = stream_id
         self.redis = redis_client
         self.policy = policy
-        self.keys = key_builder
+        self.keys = black_keys
         self.event_ttl_seconds = event_ttl_seconds
         self.commit_ttl_seconds = commit_ttl_seconds
         self.reducer = reducer or RepeatedBlackReducer(policy)
-        self.alerts = alert_publisher or BlackAlertPublisher(
-            stream_id=stream_id,
-            key_builder=self.keys,
-        )
+        self.alerts = alert_publisher
 
     def record_resolved_event(
         self,
@@ -51,7 +48,10 @@ class RedisRepeatedBlackRepository:
         commit_key: str | None,
     ) -> None:
         history_key, duration_key, incident_key = (
-            self._state_keys(event.variant_stable_id)
+            self._state_keys(
+                event.variant_stable_id,
+                event.timeline_generation,
+            )
         )
         event_time = event.end_program_time or datetime.now(
             timezone.utc
@@ -123,7 +123,10 @@ class RedisRepeatedBlackRepository:
             or datetime.now(timezone.utc)
         )
         history_key, duration_key, incident_key = (
-            self._state_keys(segment.variant_stable_id)
+            self._state_keys(
+                segment.variant_stable_id,
+                segment.timeline_generation,
+            )
         )
 
         try:
@@ -158,19 +161,26 @@ class RedisRepeatedBlackRepository:
                 f"Unable to resolve repeated black incident: {exc}"
             ) from exc
 
-    def _state_keys(self, variant_stable_id: str):
+    def _state_keys(
+        self,
+        variant_stable_id: str,
+        timeline_generation: int,
+    ):
         return (
-            self.keys.black_short_history(
+            self.keys.short_history(
                 stream_id=self.stream_id,
                 variant_stable_id=variant_stable_id,
+                timeline_generation=timeline_generation,
             ),
-            self.keys.black_short_duration(
+            self.keys.short_duration(
                 stream_id=self.stream_id,
                 variant_stable_id=variant_stable_id,
+                timeline_generation=timeline_generation,
             ),
-            self.keys.black_repeat_incident(
+            self.keys.repeat_incident(
                 stream_id=self.stream_id,
                 variant_stable_id=variant_stable_id,
+                timeline_generation=timeline_generation,
             ),
         )
 

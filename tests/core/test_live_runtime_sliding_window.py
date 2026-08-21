@@ -7,10 +7,12 @@ from core.live_runtime import (
     LiveMonitoringRuntime,
     LiveRuntimeSettings,
 )
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import RuntimeRedisKeys
 from core.segment_processor import SegmentProcessOutcome
 from models.analysis import (
     AnalysisRequirement,
+    AnalysisResourceClass,
+    ResourcePoolLimit,
     SegmentAnalysisBundle,
     VideoRealtimeAnalysis,
 )
@@ -25,7 +27,7 @@ from models.runtime import LiveCycleStats
 from playlist.master_parser import Variant
 from profiles.video_realtime import VideoRealtimeProfile
 from core.context import MonitoringContext
-from tests.factories.hls import make_snapshot
+from tests.factories.hls import make_segment, make_snapshot
 
 
 class ImmediateExecutor:
@@ -69,7 +71,6 @@ class FakeRedis:
 
 class FakeStateStore:
     def __init__(self, *, busy_sequences=None):
-        self.key_builder = RedisKeyBuilder()
         self.redis = FakeRedis()
         self.lease_ms = 90_000
         self.max_attempts = 3
@@ -196,7 +197,7 @@ class FakeVideoProfile:
     def supports_segment(segment):
         return segment.has_video
 
-    def analyze(self, segment):
+    def analyze(self, segment, *, requirements=None):
         self.analyzed.append(segment.sequence)
         return SegmentAnalysisBundle(
             profile_name=self.name,
@@ -294,9 +295,12 @@ def make_runtime(
         state_store=state_store,
         processors=processors,
         analysis_profiles=[profile],
+        runtime_keys=RuntimeRedisKeys(),
         settings=LiveRuntimeSettings(
-            max_workers=1,
-            max_pending_tasks=0,
+            resource_limits={
+                AnalysisResourceClass.VIDEO_DECODE: ResourcePoolLimit(1, 0)
+            },
+            max_concurrent_media_processes=1,
         ),
     )
     runtime.profile_scheduler.executor = ImmediateExecutor()
@@ -353,6 +357,100 @@ def test_new_segment_is_processed_once(monkeypatch):
     assert processor.processed.count(103) == 1
     assert processor.processed.count(104) == 1
     assert processor.processed == [100, 101, 102, 103, 104]
+
+
+def test_timeline_reset_reprocesses_reused_successful_sequence(monkeypatch):
+    snapshots = [
+        make_snapshot([100], observed_at=observed_time(0)),
+        make_snapshot([500], observed_at=observed_time(6)),
+        make_snapshot([100], observed_at=observed_time(12)),
+    ]
+    processor = FakeProcessor()
+    state_store = FakeStateStore()
+    runtime = make_runtime(
+        monkeypatch,
+        snapshots,
+        processor,
+        state_store,
+    )
+
+    runtime.run_cycle()
+    runtime.run_cycle()
+    stats = runtime.run_cycle()
+
+    assert processor.processed == [100, 500, 100]
+    reused = [
+        identity
+        for identity in state_store.records
+        if identity.sequence == 100
+    ]
+    assert {item.timeline_generation for item in reused} == {0, 1}
+    assert stats.timeline_reset_count == 1
+
+
+def test_replaced_segment_gets_new_revision_and_is_reprocessed(monkeypatch):
+    snapshots = [
+        make_snapshot(
+            [100],
+            observed_at=observed_time(0),
+            segments=[make_segment(100, uri="https://media/a.ts")],
+        ),
+        make_snapshot(
+            [100],
+            observed_at=observed_time(6),
+            segments=[make_segment(100, uri="https://media/b.ts")],
+        ),
+    ]
+    processor = FakeProcessor()
+    state_store = FakeStateStore()
+    runtime = make_runtime(
+        monkeypatch,
+        snapshots,
+        processor,
+        state_store,
+    )
+
+    runtime.run_cycle()
+    stats = runtime.run_cycle()
+
+    assert processor.processed == [100, 100]
+    identities = list(state_store.records)
+    assert {item.timeline_generation for item in identities} == {0}
+    assert len({item.media_revision for item in identities}) == 2
+    assert stats.timeline_conflict_count == 1
+
+
+def test_signed_query_rotation_keeps_revision_and_is_not_reprocessed(
+    monkeypatch,
+):
+    snapshots = [
+        make_snapshot(
+            [100],
+            observed_at=observed_time(0),
+            segments=[
+                make_segment(100, uri="https://media/a.ts?token=old")
+            ],
+        ),
+        make_snapshot(
+            [100],
+            observed_at=observed_time(6),
+            segments=[
+                make_segment(100, uri="https://media/a.ts?token=new")
+            ],
+        ),
+    ]
+    processor = FakeProcessor()
+    runtime = make_runtime(
+        monkeypatch,
+        snapshots,
+        processor,
+        FakeStateStore(),
+    )
+
+    runtime.run_cycle()
+    runtime.run_cycle()
+
+    assert processor.processed == [100]
 
 
 def test_retryable_retained_segment_can_be_retried(

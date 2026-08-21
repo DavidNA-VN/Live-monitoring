@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
 from threading import Event
 from time import monotonic
+from types import MappingProxyType
 
 from core.analysis_profile import AnalysisProfile
 from core.context import build_monitoring_context
@@ -20,9 +21,15 @@ from core.metrics import RuntimeMetricCollector
 from core.playlist_delta import PlaylistDeltaEngine
 from core.profile_scheduler import ProfileScheduler
 from core.redis_client import RedisUnavailableError
+from core.redis_keys import RuntimeRedisKeys
 from core.runtime_health import RedisRuntimeHealthReporter
 from core.segment_processor import SegmentProcessor
 from core.segment_state import RedisSegmentStateStore
+from models.analysis import (
+    AnalysisResourceClass,
+    ResourcePoolLimit,
+    default_resource_limits,
+)
 from models.runtime import LiveCycleStats
 from models.stream import StreamIdentity
 from playlist.errors import PlaylistLoadError
@@ -38,8 +45,11 @@ class LiveRuntimeSettings:
     min_poll_interval: float = 0.5
     max_poll_interval: float = 5.0
     error_retry_interval: float = 1.0
-    max_workers: int = 4
-    max_pending_tasks: int = 16
+    resource_limits: Mapping[
+        AnalysisResourceClass,
+        ResourcePoolLimit,
+    ] = field(default_factory=default_resource_limits)
+    max_concurrent_media_processes: int = 4
     max_admitted_work: int = 2048
     max_work_age_seconds: float = 120.0
     max_segments_per_batch: int = 20
@@ -52,7 +62,9 @@ class LiveRuntimeSettings:
             "poll_factor": self.poll_factor,
             "min_poll_interval": self.min_poll_interval,
             "error_retry_interval": self.error_retry_interval,
-            "max_workers": self.max_workers,
+            "max_concurrent_media_processes": (
+                self.max_concurrent_media_processes
+            ),
             "max_admitted_work": self.max_admitted_work,
             "max_work_age_seconds": self.max_work_age_seconds,
             "max_segments_per_batch": self.max_segments_per_batch,
@@ -61,8 +73,17 @@ class LiveRuntimeSettings:
         for name, value in positive.items():
             if value <= 0:
                 raise ValueError(f"{name} must be > 0")
-        if self.max_pending_tasks < 0:
-            raise ValueError("max_pending_tasks must be >= 0")
+        normalized_limits = {}
+        for resource_class, limit in self.resource_limits.items():
+            normalized_class = AnalysisResourceClass(resource_class)
+            if not isinstance(limit, ResourcePoolLimit):
+                raise TypeError("resource_limits values must be ResourcePoolLimit")
+            normalized_limits[normalized_class] = limit
+        object.__setattr__(
+            self,
+            "resource_limits",
+            MappingProxyType(normalized_limits),
+        )
         if self.max_poll_interval < self.min_poll_interval:
             raise ValueError(
                 "max_poll_interval must be >= min_poll_interval"
@@ -76,6 +97,7 @@ class LiveMonitoringRuntime:
         state_store: RedisSegmentStateStore,
         processors: list[SegmentProcessor],
         analysis_profiles: list[AnalysisProfile],
+        runtime_keys: RuntimeRedisKeys | None = None,
         health_reporter: RedisRuntimeHealthReporter | None = None,
         settings: LiveRuntimeSettings | None = None,
         delta_engine: PlaylistDeltaEngine | None = None,
@@ -89,11 +111,24 @@ class LiveMonitoringRuntime:
             request_headers=self.settings.request_headers,
             loader=build_monitoring_context,
         )
-        self.observations = PlaylistObservationTracker(delta_engine)
+        generation_store = (
+            state_store
+            if hasattr(state_store, "get_timeline_generation")
+            and hasattr(state_store, "advance_timeline_generation")
+            else None
+        )
+        self.observations = PlaylistObservationTracker(
+            delta_engine,
+            stream_id=stream.stream_id,
+            generation_store=generation_store,
+        )
         self.variant_registry = RedisActiveVariantRegistry(
             stream_id=stream.stream_id,
             redis_client=state_store.redis,
-            key_builder=state_store.key_builder,
+            runtime_keys=(
+                runtime_keys
+                or RuntimeRedisKeys(state_store.processing_keys.namespace)
+            ),
         )
         self.metrics = RuntimeMetricCollector()
         self.profile_scheduler = ProfileScheduler(
@@ -101,8 +136,10 @@ class LiveMonitoringRuntime:
             state_store=state_store,
             processors=processors,
             analysis_profiles=analysis_profiles,
-            max_workers=self.settings.max_workers,
-            max_pending_tasks=self.settings.max_pending_tasks,
+            resource_limits=self.settings.resource_limits,
+            max_concurrent_media_processes=(
+                self.settings.max_concurrent_media_processes
+            ),
             max_admitted_work=self.settings.max_admitted_work,
             max_work_age_seconds=self.settings.max_work_age_seconds,
             max_segments_per_batch=self.settings.max_segments_per_batch,
@@ -174,9 +211,12 @@ class LiveMonitoringRuntime:
             snapshot = context.snapshot_for_variant(variant)
             if snapshot is None:
                 continue
-            self.observations.observe(snapshot=snapshot, stats=stats)
-            self.profile_scheduler.admit_snapshot(
+            observation = self.observations.observe(
                 snapshot=snapshot,
+                stats=stats,
+            )
+            self.profile_scheduler.admit_snapshot(
+                snapshot=observation.snapshot,
                 stats=stats,
             )
         self.profile_scheduler.dispatch_pending(stats=stats)

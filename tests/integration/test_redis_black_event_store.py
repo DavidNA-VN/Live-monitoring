@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import os
 from threading import Barrier
@@ -11,13 +12,29 @@ from checks.black_screen.live_state import (
     RedisBlackEventStore,
 )
 from core.redis_client import RedisClient, RedisSettings
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import (
+    AlertRedisKeys,
+    ProcessingRedisKeys,
+    RedisNamespace,
+    RuntimeRedisKeys,
+)
+from checks.black_screen.redis_keys import BlackScreenRedisKeys
+from core.segment_state import RedisSegmentStateStore
 from models.detection import BlackDetectionResult, BlackInterval
 from policies.black_screen import BlackScreenAlertPolicy
 from tests.factories.hls import make_segment
 
 
 pytestmark = pytest.mark.redis_integration
+
+
+@dataclass(frozen=True)
+class RedisKeySpaces:
+    namespace: RedisNamespace
+    processing: ProcessingRedisKeys
+    runtime: RuntimeRedisKeys
+    alert: AlertRedisKeys
+    black: BlackScreenRedisKeys
 
 
 @pytest.fixture
@@ -40,12 +57,19 @@ def redis_context():
         pytest.skip(f"Disposable Redis is unavailable: {exc}")
 
     prefix = f"media-monitor:test:{uuid4().hex}"
-    keys = RedisKeyBuilder(prefix=prefix)
+    namespace = RedisNamespace(prefix)
+    keys = RedisKeySpaces(
+        namespace=namespace,
+        processing=ProcessingRedisKeys(namespace),
+        runtime=RuntimeRedisKeys(namespace),
+        alert=AlertRedisKeys(namespace),
+        black=BlackScreenRedisKeys(namespace),
+    )
     try:
         yield client, keys
     finally:
         matching = list(
-            client.client.scan_iter(match=f"{prefix}:*")
+            client.client.scan_iter(match=f"{namespace.prefix}:*")
         )
         if matching:
             client.client.delete(*matching)
@@ -67,7 +91,9 @@ def store(client, keys, *, policy=None):
     return RedisBlackEventStore(
         stream_id="stream-1",
         redis_client=client,
-        key_builder=keys,
+        black_keys=keys.black,
+        alert_keys=keys.alert,
+        runtime_keys=keys.runtime,
         policy=policy,
     )
 
@@ -76,7 +102,7 @@ def alerts(client, keys):
     return [
         fields
         for _, fields in client.client.xrange(
-            keys.alert_outbox()
+            keys.alert.outbox()
         )
     ]
 
@@ -108,6 +134,63 @@ def test_open_idempotency_and_restart_resolution(redis_context):
         "OPEN",
         "RESOLVED",
     ]
+
+
+def test_timeline_generation_advance_is_atomic_and_persistent(redis_context):
+    client, keys = redis_context
+    state = RedisSegmentStateStore(
+        redis_client=client,
+        processing_keys=keys.processing,
+    )
+
+    def advance():
+        return state.advance_timeline_generation(
+            stream_id="stream-1",
+            variant_stable_id="v720",
+            expected_generation=0,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        generations = list(executor.map(lambda _item: advance(), range(8)))
+
+    restarted = RedisSegmentStateStore(
+        redis_client=client,
+        processing_keys=keys.processing,
+    )
+    assert set(generations) == {1}
+    assert restarted.get_timeline_generation(
+        stream_id="stream-1",
+        variant_stable_id="v720",
+    ) == 1
+
+
+def test_timeline_reset_reusing_sequence_creates_distinct_black_event(
+    redis_context,
+):
+    client, keys = redis_context
+    event_store = store(client, keys)
+    old = make_segment(100)
+    old.media_revision = "same-manifest-media"
+    current = make_segment(100)
+    current.timeline_generation = 1
+    current.media_revision = "same-manifest-media"
+
+    event_store.apply(
+        segment=old,
+        result=result(old, BlackInterval(start=0.0, end=6.0)),
+    )
+    event_store.apply(
+        segment=current,
+        result=result(current, BlackInterval(start=0.0, end=6.0)),
+    )
+
+    emitted = alerts(client, keys)
+    assert [item["state"] for item in emitted] == [
+        "OPEN",
+        "RESOLVED",
+        "OPEN",
+    ]
+    assert emitted[0]["event_id"] != emitted[2]["event_id"]
     assert emitted[1]["event_id"] == emitted[0]["event_id"]
 
 
@@ -146,7 +229,7 @@ def test_preheld_event_lock_reports_retryable_contention(
 ):
     client, keys = redis_context
     segment = make_segment(10)
-    lock_key = keys.black_event_lock(
+    lock_key = keys.black.event_lock(
         stream_id="stream-1",
         variant_stable_id=segment.variant_stable_id,
     )

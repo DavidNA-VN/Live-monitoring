@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 
 from checks.black_screen.event_codec import BlackEventCodec
 from models.black_live import BlackEventStatus, BlackLiveEvent
-from models.evidence import EventEvidence, EvidenceStrength
 
 
 def test_event_codec_round_trip_preserves_domain_state():
@@ -37,14 +36,6 @@ def test_event_codec_round_trip_preserves_domain_state():
         status=BlackEventStatus.RESOLVED,
         long_alert_sent=True,
         resolution_reason="video_returned",
-        evidence=[
-            EventEvidence(
-                evidence_type="cross_variant",
-                strength=EvidenceStrength.STRONG,
-                source="variant-correlation",
-                detail="3 variants overlap",
-            )
-        ],
     )
 
     decoded = BlackEventCodec.decode(

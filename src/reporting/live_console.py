@@ -9,7 +9,7 @@ import redis
 from core.redis_client import (
     RedisClient,
 )
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import AlertRedisKeys
 
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class LiveAlertConsole:
     def __init__(
         self,
         redis_client: RedisClient,
-        key_builder: RedisKeyBuilder | None = None,
+        alert_keys: AlertRedisKeys | None = None,
         group_name: str = "live-console-v1",
         consumer_name: str | None = None,
         block_ms: int = 1000,
@@ -34,10 +34,7 @@ class LiveAlertConsole:
             raise ValueError("dead_letter_max_length must be > 0")
         self.redis = redis_client.client
 
-        self.keys = (
-            key_builder
-            or RedisKeyBuilder()
-        )
+        self.keys = alert_keys or AlertRedisKeys()
 
         self.group_name = group_name
 
@@ -59,7 +56,7 @@ class LiveAlertConsole:
     ) -> None:
 
         stream_key = (
-            self.keys.alert_outbox()
+            self.keys.outbox()
         )
 
         self._ensure_group(
@@ -233,7 +230,7 @@ class LiveAlertConsole:
                 return
             pipeline = self.redis.pipeline(transaction=True)
             pipeline.xadd(
-                self.keys.alert_dead_letter(),
+                self.keys.dead_letter(),
                 {
                     **fields,
                     "source_stream": stream_key,

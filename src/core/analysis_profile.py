@@ -1,18 +1,11 @@
-from enum import Enum
 from typing import Protocol
 
 from models.analysis import (
     AnalysisRequirement,
+    AnalysisResourceClass,
     SegmentAnalysisBundle,
 )
 from models.segment import Segment
-
-
-class AnalysisResourceClass(str, Enum):
-    METADATA = "metadata"
-    VIDEO_DECODE = "video_decode"
-    AUDIO_DECODE = "audio_decode"
-    EXPENSIVE = "expensive"
 
 
 class AnalysisProfile(Protocol):
@@ -26,6 +19,8 @@ class AnalysisProfile(Protocol):
     def analyze(
         self,
         segment: Segment,
+        *,
+        requirements: frozenset[AnalysisRequirement],
     ) -> SegmentAnalysisBundle:
         ...
 

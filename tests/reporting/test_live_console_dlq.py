@@ -1,5 +1,5 @@
 from reporting.live_console import LiveAlertConsole
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import AlertRedisKeys, RedisNamespace
 
 
 class FakePipeline:
@@ -45,7 +45,7 @@ def failing_console(deliveries):
     client = FakeRedisClient(deliveries)
     console = LiveAlertConsole(
         redis_client=client,
-        key_builder=RedisKeyBuilder(prefix="test"),
+        alert_keys=AlertRedisKeys(RedisNamespace("test")),
         max_deliveries=3,
     )
     console._print_alert = lambda _fields: (_ for _ in ()).throw(

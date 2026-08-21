@@ -6,8 +6,13 @@ from core.process_runner import (
     ProcessStartError,
     ProcessTimeoutError,
 )
+from models.analysis import AnalysisRequirement
+from media.input_resolver import ResolvedMediaInput
 from models.segment import SegmentEncryption
 from profiles.video_realtime import VideoRealtimeProfile
+from profiles.video_realtime.command_builder import (
+    VideoRealtimeCommandBuilder,
+)
 from tests.factories.hls import make_segment
 
 
@@ -48,6 +53,10 @@ def video_result(profile, segment):
     ).require_video_realtime()
 
 
+def black_intervals(result):
+    return result.require_output(AnalysisRequirement.BLACK_INTERVALS, tuple)
+
+
 def test_profile_builds_single_blackdetect_command(segment):
     runner = FakeProcessRunner()
     profile = VideoRealtimeProfile(
@@ -71,6 +80,19 @@ def test_profile_builds_single_blackdetect_command(segment):
     assert (
         "blackdetect=d=0:pix_th=0.1:pic_th=0.98"
         in command
+    )
+
+
+def test_command_builder_assembles_filters_into_one_decode_command():
+    command = VideoRealtimeCommandBuilder().build(
+        media_input=ResolvedMediaInput("https://media/segment.ts"),
+        filter_expressions=("blackdetect=d=0", "freezedetect=d=2"),
+    )
+
+    assert command.count("ffmpeg") == 1
+    assert command.count("-vf") == 1
+    assert command[command.index("-vf") + 1] == (
+        "blackdetect=d=0,freezedetect=d=2"
     )
 
 
@@ -141,7 +163,7 @@ def test_profile_parses_black_intervals(segment, output, expected):
     assert result.checked is True
     assert [
         (interval.start, interval.end)
-        for interval in result.black_intervals
+        for interval in black_intervals(result)
     ] == expected
 
 

@@ -9,8 +9,9 @@ from core.redis_client import (
     RedisClient,
     RedisUnavailableError,
 )
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import ProcessingRedisKeys
 from core.redis_scripts import (
+    ADVANCE_TIMELINE_GENERATION,
     COMPLETE_SEGMENT,
     RELEASE_OWNED_LOCK,
     RENEW_OWNED_LOCK,
@@ -34,7 +35,7 @@ class RedisSegmentStateStore:
     def __init__(
         self,
         redis_client: RedisClient,
-        key_builder: RedisKeyBuilder | None = None,
+        processing_keys: ProcessingRedisKeys | None = None,
         lease_ms: int = 90_000,
         state_ttl_seconds: int = 21_600,
         max_attempts: int = 3,
@@ -57,16 +58,56 @@ class RedisSegmentStateStore:
         self.redis_client = redis_client
         self.redis = redis_client.client
 
-        self.key_builder = (
-            key_builder
-            or RedisKeyBuilder()
-        )
+        self.processing_keys = processing_keys or ProcessingRedisKeys()
 
         self.lease_ms = lease_ms
         self.state_ttl_seconds = (
             state_ttl_seconds
         )
         self.max_attempts = max_attempts
+
+    def get_timeline_generation(
+        self,
+        *,
+        stream_id: str,
+        variant_stable_id: str,
+    ) -> int:
+        key = self.processing_keys.timeline_generation(
+            stream_id,
+            variant_stable_id,
+        )
+        try:
+            value = self.redis.get(key)
+        except redis.RedisError as exc:
+            raise RedisUnavailableError(
+                f"Unable to read timeline generation: {exc}"
+            ) from exc
+        return self._parse_int(value, default=0)
+
+    def advance_timeline_generation(
+        self,
+        *,
+        stream_id: str,
+        variant_stable_id: str,
+        expected_generation: int,
+    ) -> int:
+        key = self.processing_keys.timeline_generation(
+            stream_id,
+            variant_stable_id,
+        )
+        try:
+            value = self.redis.eval(
+                ADVANCE_TIMELINE_GENERATION,
+                1,
+                key,
+                expected_generation,
+            )
+        except redis.RedisError as exc:
+            raise RedisUnavailableError(
+                f"Unable to advance timeline generation: {exc}"
+            ) from exc
+        return int(value)
+
     def get_records(
         self,
         identities: list[
@@ -87,7 +128,7 @@ class RedisSegmentStateStore:
 
             for identity in identities:
                 state_key = (
-                    self.key_builder.segment_state(
+                    self.processing_keys.segment_state(
                         identity
                     )
                 )
@@ -157,13 +198,13 @@ class RedisSegmentStateStore:
     ) -> SegmentClaim:
 
         state_key = (
-            self.key_builder.segment_state(
+            self.processing_keys.segment_state(
                 identity
             )
         )
 
         lock_key = (
-            self.key_builder.segment_lock(
+            self.processing_keys.segment_lock(
                 identity
             )
         )
@@ -355,7 +396,7 @@ class RedisSegmentStateStore:
         )
 
         lock_key = (
-            self.key_builder.segment_lock(
+            self.processing_keys.segment_lock(
                 claim.identity
             )
         )
@@ -394,7 +435,7 @@ class RedisSegmentStateStore:
         )
 
         lock_key = (
-            self.key_builder.segment_lock(
+            self.processing_keys.segment_lock(
                 claim.identity
             )
         )
@@ -416,13 +457,13 @@ class RedisSegmentStateStore:
         )
 
         lock_key = (
-            self.key_builder.segment_lock(
+            self.processing_keys.segment_lock(
                 claim.identity
             )
         )
 
         state_key = (
-            self.key_builder.segment_state(
+            self.processing_keys.segment_state(
                 claim.identity
             )
         )

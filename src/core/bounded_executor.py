@@ -29,6 +29,8 @@ class BoundedExecutor:
                 "media-monitor-worker"
             ),
         )
+        self.max_workers = max_workers
+        self.max_pending_tasks = max_pending_tasks
 
         self.capacity = BoundedSemaphore(
             value=(

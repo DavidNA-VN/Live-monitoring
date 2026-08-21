@@ -101,4 +101,10 @@ Redis integration tests sẽ skip nếu Redis test database không truy cập đ
 - LL-HLS chỉ xử lý full segment, chưa xử lý part.
 - Encrypted media hiện trả unsupported reason.
 
+## Production assumptions
+
+`media_revision` là fingerprint từ thông tin nhìn thấy trên HLS manifest, không phải hash nội dung segment. Timeline reset hoặc replacement làm thay đổi URI/duration/PDT/range/init/encryption/gap metadata sẽ tạo processing identity mới.
+
+Nếu origin thay binary bytes tại cùng URL sau khi segment đã `SUCCESS`, đồng thời giữ nguyên toàn bộ metadata manifest, admission không thể nhận biết để tự động decode lại. Hệ thống không hash hoặc download trước segment tại admission layer vì chi phí I/O và live latency; production origin/CDN được kỳ vọng giữ segment đã publish là immutable.
+
 Không commit live URL/token, `.env`, video, segment HLS hoặc Redis data vào repository.

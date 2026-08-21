@@ -6,7 +6,7 @@ import pytest
 
 from core.alert_stream import RedisAlertStream
 from core.redis_client import RedisClient, RedisSettings
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import AlertRedisKeys, RedisNamespace, RuntimeRedisKeys
 from core.runtime_health import RedisRuntimeHealthReporter
 from models.alert import AlertCategory, AlertEnvelope
 from models.runtime import LiveCycleStats
@@ -31,14 +31,14 @@ def redis_context():
     except Exception as exc:
         client.close()
         pytest.skip(f"Disposable Redis is unavailable: {exc}")
-    keys = RedisKeyBuilder(
-        prefix=f"media-monitor:test:{uuid4().hex}"
-    )
+    namespace = RedisNamespace(f"media-monitor:test:{uuid4().hex}")
+    alert_keys = AlertRedisKeys(namespace)
+    runtime_keys = RuntimeRedisKeys(namespace)
     try:
-        yield client, keys
+        yield client, alert_keys, runtime_keys
     finally:
         found = list(
-            client.client.scan_iter(match=f"{keys.prefix}:*")
+            client.client.scan_iter(match=f"{namespace.prefix}:*")
         )
         if found:
             client.client.delete(*found)
@@ -46,8 +46,12 @@ def redis_context():
 
 
 def test_alert_stream_is_bounded_and_schema_is_consumable(redis_context):
-    client, keys = redis_context
-    stream = RedisAlertStream(key_builder=keys, max_length=5)
+    client, alert_keys, runtime_keys = redis_context
+    stream = RedisAlertStream(
+        alert_keys=alert_keys,
+        runtime_keys=runtime_keys,
+        max_length=5,
+    )
     now = datetime.now(timezone.utc)
 
     for index in range(12):
@@ -68,29 +72,30 @@ def test_alert_stream_is_bounded_and_schema_is_consumable(redis_context):
         )
         pipeline.execute()
 
-    assert client.client.xlen(keys.alert_outbox()) == 5
+    assert client.client.xlen(alert_keys.outbox()) == 5
     _, latest = client.client.xrevrange(
-        keys.alert_outbox(), count=1
+        alert_keys.outbox(), count=1
     )[0]
     assert AlertEnvelope.from_redis_fields(latest).event_id == "event-11"
-    metrics = client.client.hgetall(keys.runtime_metrics("stream-1"))
+    metrics = client.client.hgetall(runtime_keys.metrics("stream-1"))
     assert metrics["alert_total"] == "12"
     assert metrics["alert_content_total"] == "12"
 
 
 def test_runtime_health_uses_same_versioned_envelope(redis_context):
-    client, keys = redis_context
+    client, alert_keys, runtime_keys = redis_context
     reporter = RedisRuntimeHealthReporter(
         stream_id="stream-1",
         redis_client=client,
-        key_builder=keys,
+        runtime_keys=runtime_keys,
+        alert_keys=alert_keys,
         stream_max_length=5,
     )
 
     reporter.publish_failure("master_playlist_unavailable")
 
     _, fields = client.client.xrevrange(
-        keys.alert_outbox(), count=1
+        alert_keys.outbox(), count=1
     )[0]
     decoded = AlertEnvelope.from_redis_fields(fields)
     assert decoded.category == AlertCategory.RUNTIME
@@ -105,7 +110,7 @@ def test_runtime_health_uses_same_versioned_envelope(redis_context):
         )
     )
     _, recovered_fields = client.client.xrevrange(
-        keys.alert_outbox(), count=1
+        alert_keys.outbox(), count=1
     )[0]
     recovered = AlertEnvelope.from_redis_fields(recovered_fields)
     assert recovered.state == "RECOVERED"

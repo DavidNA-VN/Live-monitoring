@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from models.analysis import AnalysisRequirement
 from profiles.video_realtime import VideoRealtimeProfile
 from playlist.master_parser import Variant
 from playlist.media_parser import parse_media_playlist
@@ -95,4 +96,7 @@ def test_generated_hls_media_is_resolved_and_analyzed(
         profile.close()
 
     assert result.checked is True, result.error
-    assert result.black_intervals
+    assert result.require_output(
+        AnalysisRequirement.BLACK_INTERVALS,
+        tuple,
+    )

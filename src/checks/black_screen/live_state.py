@@ -5,19 +5,19 @@ import redis
 
 from checks.black_screen.alert_publisher import BlackAlertPublisher
 from core.alert_stream import AlertSink
-from checks.black_screen.cross_variant import RedisBlackCrossVariantCorrelator
 from checks.black_screen.event_reducer import (
     BlackEventReducer,
     BlackEventTransitionType,
 )
 from checks.black_screen.event_repository import RedisBlackEventRepository
+from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from checks.black_screen.redis_scripts import RELEASE_OWNED_LOCK
 from checks.black_screen.repeated_reducer import RepeatedBlackReducer
 from checks.black_screen.repeated_repository import (
     RedisRepeatedBlackRepository,
 )
 from core.redis_client import RedisClient, RedisUnavailableError
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import AlertRedisKeys, RedisNamespace, RuntimeRedisKeys
 from models.black_live import BlackEventStatus, BlackLiveEvent
 from models.detection import BlackDetectionResult
 from models.segment import Segment
@@ -36,37 +36,43 @@ class RedisBlackEventStore:
         stream_id: str,
         redis_client: RedisClient,
         policy: BlackScreenAlertPolicy | None = None,
-        key_builder: RedisKeyBuilder | None = None,
+        black_keys: BlackScreenRedisKeys | None = None,
+        alert_keys: AlertRedisKeys | None = None,
+        runtime_keys: RuntimeRedisKeys | None = None,
         boundary_tolerance: float = 0.10,
         event_ttl_seconds: int = 86_400,
         commit_ttl_seconds: int = 21_600,
         event_lock_ms: int = 30_000,
         alert_stream_max_length: int = 10_000,
         alert_sink: AlertSink | None = None,
-        cross_variant_correlator: RedisBlackCrossVariantCorrelator | None = None,
         reducer: BlackEventReducer | None = None,
         repeated_reducer: RepeatedBlackReducer | None = None,
     ) -> None:
         self.stream_id = stream_id
         self.redis = redis_client.client
         self.policy = policy or BlackScreenAlertPolicy()
-        self.keys = key_builder or RedisKeyBuilder()
+        namespace = (
+            black_keys.namespace if black_keys is not None else RedisNamespace()
+        )
+        self.keys = black_keys or BlackScreenRedisKeys(namespace)
+        self.alert_keys = alert_keys or AlertRedisKeys(namespace)
+        self.runtime_keys = runtime_keys or RuntimeRedisKeys(namespace)
         self.event_lock_ms = event_lock_ms
-        self.cross_variant_correlator = cross_variant_correlator
         self.reducer = reducer or BlackEventReducer(
             stream_id=stream_id,
             boundary_tolerance=boundary_tolerance,
         )
         alerts = BlackAlertPublisher(
             stream_id=stream_id,
-            key_builder=self.keys,
+            alert_keys=self.alert_keys,
+            runtime_keys=self.runtime_keys,
             stream_max_length=alert_stream_max_length,
             alert_sink=alert_sink,
         )
         self.repository = RedisBlackEventRepository(
             stream_id=stream_id,
             redis_client=self.redis,
-            key_builder=self.keys,
+            black_keys=self.keys,
             event_ttl_seconds=event_ttl_seconds,
             commit_ttl_seconds=commit_ttl_seconds,
             alerts=alerts,
@@ -75,7 +81,7 @@ class RedisBlackEventStore:
             stream_id=stream_id,
             redis_client=self.redis,
             policy=self.policy,
-            key_builder=self.keys,
+            black_keys=self.keys,
             event_ttl_seconds=event_ttl_seconds,
             commit_ttl_seconds=commit_ttl_seconds,
             reducer=repeated_reducer,
@@ -87,16 +93,18 @@ class RedisBlackEventStore:
         segment: Segment,
         result: BlackDetectionResult,
     ) -> None:
-        commit_key = self.keys.black_commit_marker(
+        commit_key = self.keys.commit_marker(
             self.stream_id,
             segment.variant_stable_id,
             segment.discontinuity_sequence,
             segment.sequence,
+            segment.timeline_generation,
+            segment.media_revision,
         )
         try:
             if self.redis.exists(commit_key):
                 return
-            lock_key = self.keys.black_event_lock(
+            lock_key = self.keys.event_lock(
                 self.stream_id, segment.variant_stable_id
             )
             token = uuid4().hex
@@ -173,7 +181,6 @@ class RedisBlackEventStore:
             alert=should_alert,
             commit_key=commit_key,
         )
-        self._correlate(event)
 
     def _resolve(
         self,
@@ -187,15 +194,14 @@ class RedisBlackEventStore:
             self.repeated_events.record_resolved_event(
                 event=event,
                 payload=self.repository.encode(event),
-                event_key=self.keys.black_event(
+                event_key=self.keys.event(
                     self.stream_id, event.event_id
                 ),
-                open_key=self.keys.black_open_event(
+                open_key=self.keys.open_event(
                     self.stream_id, event.variant_stable_id
                 ),
                 commit_key=commit_key,
             )
-            self._correlate(event)
             return
 
         alert_on_resolution = (
@@ -210,8 +216,3 @@ class RedisBlackEventStore:
             alert_on_resolution=alert_on_resolution,
             commit_key=commit_key,
         )
-        self._correlate(event)
-
-    def _correlate(self, event: BlackLiveEvent) -> None:
-        if self.cross_variant_correlator is not None:
-            self.cross_variant_correlator.observe(event)

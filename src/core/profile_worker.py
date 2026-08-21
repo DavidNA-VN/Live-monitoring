@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from threading import Event, Thread
+from threading import BoundedSemaphore, Event, Thread
 from datetime import datetime, timezone
 from time import monotonic
 
-from core.analysis_profile import AnalysisProfile
+from core.analysis_profile import AnalysisProfile, AnalysisResourceClass
 from core.redis_client import RedisUnavailableError
 from core.metrics import RuntimeMetricCollector
 from core.segment_admission import ProfileSegmentIdentity
 from core.segment_processor import SegmentProcessor
 from core.segment_state import RedisSegmentStateStore, SegmentLeaseLostError
-from models.analysis import SegmentAnalysisBundle
+from models.analysis import AnalysisRequirement, SegmentAnalysisBundle
 from models.processing import (
     SegmentClaim,
     SegmentClaimStatus,
@@ -44,9 +44,11 @@ class ProfileWorkerCoordinator:
         self,
         state_store: RedisSegmentStateStore,
         metrics: RuntimeMetricCollector | None = None,
+        media_process_gate: BoundedSemaphore | None = None,
     ) -> None:
         self.state_store = state_store
         self.metrics = metrics or RuntimeMetricCollector()
+        self.media_process_gate = media_process_gate
 
     def process_batch(
         self,
@@ -118,7 +120,33 @@ class ProfileWorkerCoordinator:
         blocked: set[str],
     ) -> SegmentAnalysisBundle | None:
         try:
-            return profile.analyze(segment)
+            requirements: frozenset[AnalysisRequirement] = frozenset(
+                requirement
+                for processor, _claim in claimed
+                for requirement in processor.requirements
+            )
+            uses_media_process = getattr(
+                profile,
+                "resource_class",
+                AnalysisResourceClass.VIDEO_DECODE,
+            ) in (
+                AnalysisResourceClass.VIDEO_DECODE,
+                AnalysisResourceClass.AUDIO_DECODE,
+                AnalysisResourceClass.EXPENSIVE,
+            )
+            if not uses_media_process or self.media_process_gate is None:
+                return profile.analyze(
+                    segment,
+                    requirements=requirements,
+                )
+            self.media_process_gate.acquire()
+            try:
+                return profile.analyze(
+                    segment,
+                    requirements=requirements,
+                )
+            finally:
+                self.media_process_gate.release()
         except Exception as exc:
             logger.exception(
                 "Unhandled analysis profile failure profile=%s variant=%s seq=%s",

@@ -1,6 +1,6 @@
 from checks.black_screen.alert_publisher import BlackAlertPublisher
 from checks.black_screen.event_codec import BlackEventCodec
-from core.redis_keys import RedisKeyBuilder
+from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from models.black_live import BlackLiveEvent
 
 
@@ -12,14 +12,14 @@ class RedisBlackEventRepository:
         *,
         stream_id: str,
         redis_client,
-        key_builder: RedisKeyBuilder,
+        black_keys: BlackScreenRedisKeys,
         event_ttl_seconds: int,
         commit_ttl_seconds: int,
         alerts: BlackAlertPublisher,
     ) -> None:
         self.stream_id = stream_id
         self.redis = redis_client
-        self.keys = key_builder
+        self.keys = black_keys
         self.event_ttl_seconds = event_ttl_seconds
         self.commit_ttl_seconds = commit_ttl_seconds
         self.alerts = alerts
@@ -30,7 +30,7 @@ class RedisBlackEventRepository:
 
     def load_open(self, variant_stable_id: str) -> BlackLiveEvent | None:
         raw = self.redis.get(
-            self.keys.black_open_event(self.stream_id, variant_stable_id)
+            self.keys.open_event(self.stream_id, variant_stable_id)
         )
         return self.codec.decode(raw) if raw else None
 
@@ -47,14 +47,14 @@ class RedisBlackEventRepository:
         payload = self.codec.encode(event)
         pipeline = self.redis.pipeline(transaction=True)
         pipeline.set(
-            self.keys.black_open_event(
+            self.keys.open_event(
                 self.stream_id, event.variant_stable_id
             ),
             payload,
             ex=self.event_ttl_seconds,
         )
         pipeline.set(
-            self.keys.black_event(self.stream_id, event.event_id),
+            self.keys.event(self.stream_id, event.event_id),
             payload,
             ex=self.event_ttl_seconds,
         )
@@ -78,12 +78,12 @@ class RedisBlackEventRepository:
     ) -> None:
         pipeline = self.redis.pipeline(transaction=True)
         pipeline.set(
-            self.keys.black_event(self.stream_id, event.event_id),
+            self.keys.event(self.stream_id, event.event_id),
             self.codec.encode(event),
             ex=self.event_ttl_seconds,
         )
         pipeline.delete(
-            self.keys.black_open_event(
+            self.keys.open_event(
                 self.stream_id, event.variant_stable_id
             )
         )

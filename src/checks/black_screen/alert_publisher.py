@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from checks.black_screen.repeated_reducer import RepeatedBlackAlert
 from core.alert_stream import AlertSink, RedisAlertStream
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import AlertRedisKeys, RuntimeRedisKeys
 from models.alert import (
     AlertCategory,
     AlertEnvelope,
@@ -19,13 +19,16 @@ class BlackAlertPublisher:
         self,
         *,
         stream_id: str,
-        key_builder: RedisKeyBuilder,
+        alert_keys: AlertRedisKeys,
+        runtime_keys: RuntimeRedisKeys,
         stream_max_length: int = 10_000,
         alert_sink: AlertSink | None = None,
     ) -> None:
         self.stream_id = stream_id
         self.stream = alert_sink or RedisAlertStream(
-            key_builder=key_builder, max_length=stream_max_length
+            alert_keys=alert_keys,
+            runtime_keys=runtime_keys,
+            max_length=stream_max_length,
         )
 
     def add_event(
@@ -41,6 +44,9 @@ class BlackAlertPublisher:
             "duration": f"{event.duration:.6f}",
             "start_sequence": str(event.start_sequence),
             "end_sequence": str(event.end_sequence),
+            "timeline_generation": str(event.timeline_generation),
+            "start_media_revision": event.start_media_revision,
+            "last_media_revision": event.last_media_revision,
         }
         envelope = AlertEnvelope(
             alert_id=deterministic_alert_id(

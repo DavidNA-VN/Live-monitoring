@@ -1,21 +1,77 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import logging
+from typing import Protocol
 
 import redis
 
 from core.context import MonitoringContext, build_monitoring_context
 from core.playlist_delta import PlaylistDeltaEngine
 from core.redis_client import RedisUnavailableError
-from core.redis_keys import RedisKeyBuilder
+from core.redis_keys import RuntimeRedisKeys
 from models.playlist_snapshot import MediaPlaylistSnapshot
+from models.playlist_delta import MediaPlaylistDelta
 from models.runtime import LiveCycleStats
 from models.stream import StreamIdentity
 
 
 logger = logging.getLogger(__name__)
+
+
+class TimelineGenerationStore(Protocol):
+    def get_timeline_generation(
+        self,
+        *,
+        stream_id: str,
+        variant_stable_id: str,
+    ) -> int:
+        ...
+
+    def advance_timeline_generation(
+        self,
+        *,
+        stream_id: str,
+        variant_stable_id: str,
+        expected_generation: int,
+    ) -> int:
+        ...
+
+
+class InMemoryTimelineGenerationStore:
+    def __init__(self) -> None:
+        self.generations: dict[tuple[str, str], int] = {}
+
+    def get_timeline_generation(
+        self,
+        *,
+        stream_id: str,
+        variant_stable_id: str,
+    ) -> int:
+        return self.generations.get((stream_id, variant_stable_id), 0)
+
+    def advance_timeline_generation(
+        self,
+        *,
+        stream_id: str,
+        variant_stable_id: str,
+        expected_generation: int,
+    ) -> int:
+        key = (stream_id, variant_stable_id)
+        current = self.generations.get(key, 0)
+        if current == expected_generation:
+            current += 1
+            self.generations[key] = current
+        return current
+
+
+@dataclass(frozen=True)
+class PlaylistObservation:
+    snapshot: MediaPlaylistSnapshot
+    timeline_generation: int
+    delta: MediaPlaylistDelta | None = None
 
 
 class LivePlaylistPoller:
@@ -45,19 +101,53 @@ class PlaylistObservationTracker:
     def __init__(
         self,
         delta_engine: PlaylistDeltaEngine | None = None,
+        *,
+        stream_id: str = "local",
+        generation_store: TimelineGenerationStore | None = None,
     ) -> None:
         self.delta_engine = delta_engine or PlaylistDeltaEngine()
+        self.stream_id = stream_id
+        self.generation_store = (
+            generation_store or InMemoryTimelineGenerationStore()
+        )
         self.previous_snapshots: dict[str, MediaPlaylistSnapshot] = {}
+        self.generations: dict[str, int] = {}
 
     def observe(
         self,
         *,
         snapshot: MediaPlaylistSnapshot,
         stats: LiveCycleStats,
-    ) -> None:
-        previous = self.previous_snapshots.get(snapshot.variant_stable_id)
+    ) -> PlaylistObservation:
+        variant_id = snapshot.variant_stable_id
+        previous = self.previous_snapshots.get(variant_id)
+        generation = self.generations.get(variant_id)
+        persisted_generation = self.generation_store.get_timeline_generation(
+            stream_id=self.stream_id,
+            variant_stable_id=variant_id,
+        )
+        if generation is None:
+            generation = persisted_generation
+
+        delta = None
         if previous is not None:
             delta = self.delta_engine.compare(previous, snapshot)
+            if delta.timeline_reset:
+                generation = (
+                    self.generation_store.advance_timeline_generation(
+                        stream_id=self.stream_id,
+                        variant_stable_id=variant_id,
+                        expected_generation=generation,
+                    )
+                )
+            elif persisted_generation > generation:
+                generation = persisted_generation
+                delta.timeline_reset = True
+                delta.timeline_reset_reason = "generation_advanced"
+                delta.new_segments = list(snapshot.segments)
+                delta.retained_segments = []
+                delta.replaced_segments = []
+
             stats.declared_gap_count += len(delta.declared_gap_segments)
             stats.missed_sequence_count += sum(
                 item.count for item in delta.missed_sequence_ranges
@@ -82,7 +172,57 @@ class PlaylistObservationTracker:
                     missed.start_sequence,
                     missed.end_sequence,
                 )
-        self.previous_snapshots[snapshot.variant_stable_id] = snapshot
+
+        enriched = self._enrich_snapshot(
+            snapshot=snapshot,
+            previous=previous,
+            delta=delta,
+            generation=generation,
+        )
+        self.previous_snapshots[variant_id] = enriched
+        self.generations[variant_id] = generation
+        return PlaylistObservation(
+            snapshot=enriched,
+            timeline_generation=generation,
+            delta=delta,
+        )
+
+    def _enrich_snapshot(
+        self,
+        *,
+        snapshot: MediaPlaylistSnapshot,
+        previous: MediaPlaylistSnapshot | None,
+        delta: MediaPlaylistDelta | None,
+        generation: int,
+    ) -> MediaPlaylistSnapshot:
+        previous_by_sequence = {
+            segment.sequence: segment
+            for segment in (previous.segments if previous is not None else [])
+        }
+        retained_sequences = (
+            {segment.sequence for segment in delta.retained_segments}
+            if delta is not None and not delta.timeline_reset
+            else set()
+        )
+        segments = []
+        for segment in snapshot.segments:
+            previous_segment = previous_by_sequence.get(segment.sequence)
+            if (
+                previous_segment is not None
+                and segment.sequence in retained_sequences
+                and previous_segment.timeline_generation == generation
+            ):
+                revision = previous_segment.media_revision
+            else:
+                revision = self.delta_engine.media_revision(segment)
+            segments.append(
+                replace(
+                    segment,
+                    timeline_generation=generation,
+                    media_revision=revision,
+                )
+            )
+        return replace(snapshot, segments=segments)
 
 
 class RedisActiveVariantRegistry:
@@ -91,16 +231,16 @@ class RedisActiveVariantRegistry:
         *,
         stream_id: str,
         redis_client,
-        key_builder: RedisKeyBuilder,
+        runtime_keys: RuntimeRedisKeys,
         ttl_seconds: int = 60,
     ) -> None:
         self.stream_id = stream_id
         self.redis = redis_client
-        self.keys = key_builder
+        self.keys = runtime_keys
         self.ttl_seconds = ttl_seconds
 
     def refresh(self, context: MonitoringContext) -> None:
-        key = self.keys.runtime_active_variants(self.stream_id)
+        key = self.keys.active_variants(self.stream_id)
         mapping = {
             snapshot.variant_stable_id: snapshot.variant_id
             for snapshot in context.snapshots_by_variant.values()

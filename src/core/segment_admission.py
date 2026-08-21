@@ -14,8 +14,10 @@ from models.segment import Segment
 class ProfileSegmentIdentity:
     profile_name: str
     variant_stable_id: str
+    timeline_generation: int
     discontinuity_sequence: int
     sequence: int
+    media_revision: str
 
 
 @dataclass(frozen=True)
@@ -230,6 +232,8 @@ class SegmentAdmissionQueue:
             variant_stable_id=segment.variant_stable_id,
             discontinuity_sequence=segment.discontinuity_sequence,
             sequence=segment.sequence,
+            timeline_generation=segment.timeline_generation,
+            media_revision=segment.media_revision,
         )
 
     def _expire(self, now: float) -> list[AdmissionDrop]:

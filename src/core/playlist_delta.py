@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from urllib.parse import urlsplit
 
 from models.playlist_delta import (
@@ -173,6 +175,60 @@ class PlaylistDeltaEngine:
                 replaced_segments
             ),
         )
+
+    @classmethod
+    def media_revision(cls, segment: Segment) -> str:
+        """Fingerprint manifest-visible media identity, excluding auth tokens."""
+        init_section = segment.init_section
+        encryption = segment.encryption
+        payload = {
+            "resource": cls._stable_resource_identity(segment.uri),
+            "duration": f"{segment.duration:.6f}",
+            "program_date_time": (
+                segment.program_date_time.isoformat()
+                if segment.program_date_time is not None
+                else None
+            ),
+            "byte_range": (
+                (segment.byte_range.length, segment.byte_range.offset)
+                if segment.byte_range is not None
+                else None
+            ),
+            "init": (
+                {
+                    "resource": cls._stable_resource_identity(
+                        init_section.uri
+                    ),
+                    "byte_range": (
+                        (
+                            init_section.byte_range.length,
+                            init_section.byte_range.offset,
+                        )
+                        if init_section.byte_range is not None
+                        else None
+                    ),
+                }
+                if init_section is not None
+                else None
+            ),
+            "encryption": (
+                {
+                    "method": encryption.method,
+                    "key": (
+                        cls._stable_resource_identity(encryption.key_uri)
+                        if encryption.key_uri
+                        else None
+                    ),
+                    "iv": encryption.iv,
+                    "key_format": encryption.key_format,
+                }
+                if encryption is not None
+                else None
+            ),
+            "gap": segment.gap,
+        }
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
     @staticmethod
     def _validate_snapshots(
