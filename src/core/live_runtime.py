@@ -18,6 +18,7 @@ from core.live_polling import (
     calculate_playlist_staleness,
 )
 from core.metrics import RuntimeMetricCollector
+from core.media_process_budget import ProcessGate
 from core.playlist_delta import PlaylistDeltaEngine
 from core.profile_scheduler import ProfileScheduler
 from core.redis_client import RedisUnavailableError
@@ -101,6 +102,7 @@ class LiveMonitoringRuntime:
         health_reporter: RedisRuntimeHealthReporter | None = None,
         settings: LiveRuntimeSettings | None = None,
         delta_engine: PlaylistDeltaEngine | None = None,
+        service_media_process_gate: ProcessGate | None = None,
     ) -> None:
         self.stream = stream
         self.health_reporter = health_reporter
@@ -144,6 +146,7 @@ class LiveMonitoringRuntime:
             max_work_age_seconds=self.settings.max_work_age_seconds,
             max_segments_per_batch=self.settings.max_segments_per_batch,
             metrics=self.metrics,
+            service_media_process_gate=service_media_process_gate,
         )
         self.stop_event = Event()
 
@@ -230,6 +233,19 @@ class LiveMonitoringRuntime:
         )
         stats.retry_total = worker_metrics.retry_total
         stats.ffmpeg_timeout_total = worker_metrics.ffmpeg_timeout_total
+        stats.audio_analysis_total = worker_metrics.audio_analysis_total
+        stats.audio_analysis_failure_total = (
+            worker_metrics.audio_analysis_failure_total
+        )
+        stats.audio_analysis_timeout_total = (
+            worker_metrics.audio_analysis_timeout_total
+        )
+        stats.audio_track_missing_total = (
+            worker_metrics.audio_track_missing_total
+        )
+        stats.audio_silence_seconds_total = (
+            worker_metrics.audio_silence_seconds_total
+        )
         stats.poll_interval = calculate_poll_interval(
             context,
             poll_factor=self.settings.poll_factor,

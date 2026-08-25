@@ -6,6 +6,9 @@ from urllib.parse import urlsplit, urlunsplit
 from playlist.errors import PlaylistLoadError
 import m3u8
 
+from models.audio import AudioTrackHint
+from models.rendition import MediaRenditionKind
+
 
 @dataclass
 class Variant:
@@ -22,6 +25,13 @@ class Variant:
     audio_group: str | None = None
     frame_rate: float | None = None
     has_video: bool = True
+    audio_track_hint: AudioTrackHint = AudioTrackHint.UNKNOWN
+    rendition_kind: MediaRenditionKind = MediaRenditionKind.VARIANT
+    rendition_name: str | None = None
+    language: str | None = None
+    is_default: bool = False
+    autoselect: bool = False
+    hls_stable_rendition_id: str | None = None
 
 
 _VIDEO_CODEC_PREFIXES = (
@@ -42,6 +52,10 @@ _AUDIO_CODEC_PREFIXES = (
     "opus",
     "flac",
 )
+
+
+def _hls_yes(value: object) -> bool:
+    return value is True or str(value).upper() == "YES"
 
 
 def _infer_has_video(
@@ -74,6 +88,37 @@ def _infer_has_video(
             for codec in codec_names
         )
     )
+
+
+def _infer_audio_track_hint(
+    codecs: str | None,
+    audio_group: str | None,
+) -> AudioTrackHint:
+    if audio_group:
+        return AudioTrackHint.EXTERNAL
+
+    if not codecs:
+        return AudioTrackHint.UNKNOWN
+
+    codec_names = [
+        value.strip().lower()
+        for value in codecs.split(",")
+        if value.strip()
+    ]
+
+    if any(
+        codec.startswith(_AUDIO_CODEC_PREFIXES)
+        for codec in codec_names
+    ):
+        return AudioTrackHint.MUXED
+
+    if codec_names and all(
+        codec.startswith(_VIDEO_CODEC_PREFIXES)
+        for codec in codec_names
+    ):
+        return AudioTrackHint.ABSENT
+
+    return AudioTrackHint.UNKNOWN
 
 
 def _stable_variant_id(
@@ -112,6 +157,24 @@ def _stable_variant_id(
     ).hexdigest()[:24]
 
 
+def _stable_audio_rendition_id(
+    *,
+    uri: str,
+    group_id: str,
+    hls_stable_rendition_id: str | None = None,
+) -> str:
+    parsed = urlsplit(uri)
+    stable_uri = urlunsplit(
+        (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, "", "")
+    )
+    identity = (
+        f"audio|stable|{group_id}|{hls_stable_rendition_id}"
+        if hls_stable_rendition_id
+        else f"audio|uri|{stable_uri}|{group_id}"
+    )
+    return sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
 def parse_master_playlist(
     master_url: str,
     timeout: float = 5.0,
@@ -144,6 +207,14 @@ def parse_master_playlist(
 
     variants: list[Variant] = []
     used_ids: dict[str, int] = {}
+    referenced_audio_groups: set[str] = set()
+    master_media = tuple(getattr(master, "media", ()))
+    external_audio_groups = {
+        str(getattr(media, "group_id", "") or "")
+        for media in master_media
+        if str(getattr(media, "type", "")).upper() == "AUDIO"
+        and getattr(media, "absolute_uri", None)
+    }
 
     for index, playlist in enumerate(
         master.playlists
@@ -162,6 +233,8 @@ def parse_master_playlist(
             "audio",
             None,
         )
+        if audio_group:
+            referenced_audio_groups.add(str(audio_group))
         raw_frame_rate = getattr(
             stream_info,
             "frame_rate",
@@ -212,6 +285,63 @@ def parse_master_playlist(
                     resolution,
                     codecs,
                 ),
+                audio_track_hint=_infer_audio_track_hint(
+                    codecs,
+                    (
+                        audio_group
+                        if audio_group in external_audio_groups
+                        else None
+                    ),
+                ),
+            )
+        )
+
+    known_audio_ids: set[str] = set()
+    for media in master_media:
+        if str(getattr(media, "type", "")).upper() != "AUDIO":
+            continue
+        group_id = str(getattr(media, "group_id", "") or "")
+        uri = getattr(media, "absolute_uri", None)
+        if not group_id or group_id not in referenced_audio_groups or not uri:
+            continue
+        name = str(getattr(media, "name", "") or "audio")
+        language = getattr(media, "language", None)
+        hls_stable_rendition_id = getattr(
+            media,
+            "stable_rendition_id",
+            None,
+        )
+        stable_id = _stable_audio_rendition_id(
+            uri=uri,
+            group_id=group_id,
+            hls_stable_rendition_id=hls_stable_rendition_id,
+        )
+        if stable_id in known_audio_ids:
+            continue
+        known_audio_ids.add(stable_id)
+        base_id = f"audio:{group_id}:{name}"
+        occurrence = used_ids.get(base_id, 0)
+        used_ids[base_id] = occurrence + 1
+        rendition_id = (
+            base_id if occurrence == 0 else f"{base_id}_{occurrence + 1}"
+        )
+        variants.append(
+            Variant(
+                id=rendition_id,
+                stable_id=stable_id,
+                uri=uri,
+                bandwidth=None,
+                resolution=None,
+                codecs=None,
+                audio_group=group_id,
+                has_video=False,
+                audio_track_hint=AudioTrackHint.MUXED,
+                rendition_kind=MediaRenditionKind.AUDIO,
+                rendition_name=name,
+                language=language,
+                is_default=_hls_yes(getattr(media, "default", False)),
+                autoselect=_hls_yes(getattr(media, "autoselect", False)),
+                hls_stable_rendition_id=hls_stable_rendition_id,
             )
         )
 

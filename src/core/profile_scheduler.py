@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Mapping
-from threading import BoundedSemaphore, Lock
+from threading import Lock
 
 from core.analysis_profile import AnalysisProfile, AnalysisResourceClass
 from core.bounded_executor import BoundedExecutor
@@ -10,6 +10,7 @@ from core.profile_worker import (
     ProfileWorkerCoordinator,
 )
 from core.metrics import RuntimeMetricCollector
+from core.media_process_budget import ProcessGate, process_gate
 from core.segment_admission import (
     AdmissionDrop,
     AdmissionDropReason,
@@ -54,6 +55,7 @@ class ProfileScheduler:
         max_segments_per_batch: int = 20,
         admission_queue: AdmissionQueue | None = None,
         metrics: RuntimeMetricCollector | None = None,
+        service_media_process_gate: ProcessGate | None = None,
     ) -> None:
         if max_segments_per_batch <= 0:
             raise ValueError("max_segments_per_batch must be > 0")
@@ -93,8 +95,9 @@ class ProfileScheduler:
             max_age_seconds=max_work_age_seconds,
         )
         self.max_segments_per_batch = max_segments_per_batch
-        self.media_process_gate = BoundedSemaphore(
-            max_concurrent_media_processes
+        self.media_process_gate = process_gate(
+            per_stream_limit=max_concurrent_media_processes,
+            service_gate=service_media_process_gate,
         )
         self.worker = ProfileWorkerCoordinator(
             state_store,

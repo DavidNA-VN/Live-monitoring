@@ -8,6 +8,7 @@ class FakePipeline:
     def __init__(self):
         self.mapping = None
         self.expiry = None
+        self.increments = {}
 
     def hset(self, _key, *, mapping):
         self.mapping = mapping
@@ -15,6 +16,14 @@ class FakePipeline:
 
     def expire(self, _key, seconds):
         self.expiry = seconds
+        return self
+
+    def hincrby(self, _key, name, value):
+        self.increments[name] = value
+        return self
+
+    def hincrbyfloat(self, _key, name, value):
+        self.increments[name] = value
         return self
 
     def execute(self):
@@ -53,6 +62,11 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         backpressure_deferred_work_count=3,
         dropped_work_count=1,
         dropped_capacity_work_count=1,
+        audio_analysis_total=7,
+        audio_analysis_failure_total=2,
+        audio_analysis_timeout_total=1,
+        audio_track_missing_total=3,
+        audio_silence_seconds_total=12.5,
     )
 
     reporter.publish(stats)
@@ -62,4 +76,10 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert mapping["queue_lag_seconds"] == "2.500000"
     assert mapping["backpressure_deferred_work"] == 3
     assert mapping["dropped_capacity_work"] == 1
+    increments = client.client.pipeline_instance.increments
+    assert increments["audio_analysis_total"] == 7
+    assert increments["audio_analysis_failure_total"] == 2
+    assert increments["audio_analysis_timeout_total"] == 1
+    assert increments["audio_track_missing_total"] == 3
+    assert increments["audio_silence_seconds_total"] == 12.5
     assert client.client.pipeline_instance.expiry == 45

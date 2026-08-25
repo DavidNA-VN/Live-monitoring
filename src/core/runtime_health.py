@@ -151,8 +151,28 @@ class RedisRuntimeHealthReporter:
                 self.runtime_keys.metrics(self.stream_id),
                 mapping=mapping,
             )
+            metrics_key = self.runtime_keys.metrics(self.stream_id)
+            counters = {
+                "audio_analysis_total": stats.audio_analysis_total,
+                "audio_analysis_failure_total": (
+                    stats.audio_analysis_failure_total
+                ),
+                "audio_analysis_timeout_total": (
+                    stats.audio_analysis_timeout_total
+                ),
+                "audio_track_missing_total": stats.audio_track_missing_total,
+            }
+            for name, value in counters.items():
+                if value:
+                    pipeline.hincrby(metrics_key, name, value)
+            if stats.audio_silence_seconds_total:
+                pipeline.hincrbyfloat(
+                    metrics_key,
+                    "audio_silence_seconds_total",
+                    stats.audio_silence_seconds_total,
+                )
             pipeline.expire(
-                self.runtime_keys.metrics(self.stream_id),
+                metrics_key,
                 self.health_ttl_seconds,
             )
             pipeline.execute()

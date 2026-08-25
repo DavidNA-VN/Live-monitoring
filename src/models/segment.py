@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from models.audio import AudioTrackHint
+from models.rendition import MediaRenditionKind
+
 
 @dataclass(frozen=True)
 class ByteRange:
@@ -50,6 +53,14 @@ class Segment:
     init_section: MediaInitializationSection | None = None
     encryption: SegmentEncryption | None = None
     has_video: bool = True
+    audio_track_hint: AudioTrackHint = AudioTrackHint.UNKNOWN
+    rendition_kind: MediaRenditionKind = MediaRenditionKind.VARIANT
+    audio_group: str | None = None
+    rendition_name: str | None = None
+    language: str | None = None
+    rendition_default: bool = False
+    rendition_autoselect: bool = False
+    hls_stable_rendition_id: str | None = None
 
     # Assigned by PlaylistObservationTracker, not by the HLS parser.
     timeline_generation: int = 0

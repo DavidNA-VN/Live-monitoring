@@ -224,6 +224,45 @@ def test_two_workers_do_not_emit_duplicate_open(redis_context):
     ] == ["OPEN"]
 
 
+def test_canonical_events_are_stored_inside_variant_keyspace(redis_context):
+    client, keys = redis_context
+    event_store = store(client, keys)
+    first = make_segment(10, variant_id="720p")
+    second = make_segment(
+        10,
+        variant_id="1080p",
+        variant_stable_id="v1080",
+    )
+
+    event_store.apply(
+        segment=first,
+        result=result(first, BlackInterval(start=0.0, end=6.0)),
+    )
+    event_store.apply(
+        segment=second,
+        result=result(second, BlackInterval(start=0.0, end=6.0)),
+    )
+
+    emitted = alerts(client, keys)
+    assert len(emitted) == 2
+    for segment, alert in zip((first, second), emitted):
+        event_key = keys.black.event(
+            "stream-1",
+            segment.variant_stable_id,
+            alert["event_id"],
+        )
+        assert client.client.exists(event_key)
+
+    assert not list(
+        client.client.scan_iter(
+            match=(
+                f"{keys.namespace.prefix}:stream:stream-1:"
+                "black:event:*"
+            )
+        )
+    )
+
+
 def test_preheld_event_lock_reports_retryable_contention(
     redis_context,
 ):

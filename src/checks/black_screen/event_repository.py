@@ -54,7 +54,11 @@ class RedisBlackEventRepository:
             ex=self.event_ttl_seconds,
         )
         pipeline.set(
-            self.keys.event(self.stream_id, event.event_id),
+            self.keys.event(
+                self.stream_id,
+                event.variant_stable_id,
+                event.event_id,
+            ),
             payload,
             ex=self.event_ttl_seconds,
         )
@@ -78,7 +82,11 @@ class RedisBlackEventRepository:
     ) -> None:
         pipeline = self.redis.pipeline(transaction=True)
         pipeline.set(
-            self.keys.event(self.stream_id, event.event_id),
+            self.keys.event(
+                self.stream_id,
+                event.variant_stable_id,
+                event.event_id,
+            ),
             self.codec.encode(event),
             ex=self.event_ttl_seconds,
         )

@@ -33,6 +33,11 @@ class LiveCycleStats:
     segment_age_seconds_max: float = 0.0
     retry_total: int = 0
     ffmpeg_timeout_total: int = 0
+    audio_analysis_total: int = 0
+    audio_analysis_failure_total: int = 0
+    audio_analysis_timeout_total: int = 0
+    audio_track_missing_total: int = 0
+    audio_silence_seconds_total: float = 0.0
 
     redis_unavailable: bool = False
 

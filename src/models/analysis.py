@@ -4,9 +4,12 @@ from enum import Enum
 from types import MappingProxyType
 from typing import TypeVar
 
+from models.audio import AudioTrackPresence
+
 
 class AnalysisRequirement(str, Enum):
     BLACK_INTERVALS = "black_intervals"
+    SILENCE_INTERVALS = "silence_intervals"
 
 
 class AnalysisResourceClass(str, Enum):
@@ -76,9 +79,43 @@ class VideoRealtimeAnalysis:
 
 
 @dataclass(frozen=True)
+class AudioRealtimeAnalysis:
+    checked: bool
+    presence: AudioTrackPresence
+    error: str | None = None
+    retryable: bool = True
+    timed_out: bool = False
+    outputs: Mapping[AnalysisRequirement, object] = field(
+        default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "outputs", MappingProxyType(dict(self.outputs)))
+
+    def require_output(
+        self,
+        requirement: AnalysisRequirement,
+        output_type: type[OutputT],
+    ) -> OutputT:
+        try:
+            output = self.outputs[requirement]
+        except KeyError as exc:
+            raise ValueError(
+                f"Audio analysis has no {requirement.value} output"
+            ) from exc
+        if not isinstance(output, output_type):
+            raise TypeError(
+                f"Invalid {requirement.value} output: "
+                f"expected {output_type.__name__}"
+            )
+        return output
+
+
+@dataclass(frozen=True)
 class SegmentAnalysisBundle:
     profile_name: str
     video_realtime: VideoRealtimeAnalysis | None = None
+    audio_realtime: AudioRealtimeAnalysis | None = None
 
     def require_video_realtime(self) -> VideoRealtimeAnalysis:
         if self.video_realtime is None:
@@ -87,3 +124,21 @@ class SegmentAnalysisBundle:
             )
 
         return self.video_realtime
+
+    def require_audio_realtime(self) -> AudioRealtimeAnalysis:
+        if self.audio_realtime is None:
+            raise ValueError(
+                "Analysis bundle has no audio_realtime result"
+            )
+
+        return self.audio_realtime
+
+    @property
+    def media_process_timed_out(self) -> bool:
+        return any(
+            item is not None and item.timed_out
+            for item in (
+                self.video_realtime,
+                self.audio_realtime,
+            )
+        )

@@ -3,7 +3,7 @@ import logging
 import signal
 from threading import Event, Thread
 
-from app.black_screen_session_factory import BlackScreenSessionFactory
+from app.monitoring_session_factory import MonitoringSessionFactory
 from core.redis_client import RedisClient
 from core.stream_session import StreamSessionStatus
 from core.stream_supervisor import StreamSupervisor
@@ -11,7 +11,7 @@ from models.stream_config import StreamConfig
 from reporting.live_console import LiveAlertConsole
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--url", required=True, help="Live HLS master playlist URL"
@@ -26,7 +26,47 @@ def parse_args():
         action="store_true",
         help="Enable the optional debug alert consumer",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--disable-black-screen",
+        action="store_true",
+        help="Disable black-screen monitoring",
+    )
+    parser.add_argument(
+        "--disable-audio-loss",
+        action="store_true",
+        help="Disable audio-loss monitoring",
+    )
+    parser.add_argument(
+        "--silence-threshold-dbfs",
+        type=float,
+        default=-60.0,
+        help="All-channel silence threshold in dBFS",
+    )
+    parser.add_argument(
+        "--audio-loss-duration",
+        type=float,
+        default=30.0,
+        help="Continuous audio-loss alert duration in seconds",
+    )
+    parser.add_argument(
+        "--audio-track-index",
+        type=int,
+        default=0,
+        help="Zero-based muxed audio track index",
+    )
+    parser.add_argument(
+        "--max-media-processes",
+        type=int,
+        default=4,
+        help="Per-stream concurrent FFmpeg process budget",
+    )
+    parser.add_argument(
+        "--max-service-media-processes",
+        type=int,
+        default=8,
+        help="Service-wide concurrent FFmpeg process budget",
+    )
+    return parser.parse_args(argv)
 
 
 def main():
@@ -39,7 +79,11 @@ def main():
     args = parse_args()
     shutdown_event = Event()
     supervisor = StreamSupervisor(
-        session_factory=BlackScreenSessionFactory(),
+        session_factory=MonitoringSessionFactory(
+            max_concurrent_media_processes=(
+                args.max_service_media_processes
+            )
+        ),
         max_streams=1,
     )
     console_client = None
@@ -57,6 +101,18 @@ def main():
             StreamConfig(
                 master_url=args.url,
                 stream_id=args.stream_id,
+                black_screen_enabled=(
+                    not args.disable_black_screen
+                ),
+                audio_loss_enabled=(
+                    not args.disable_audio_loss
+                ),
+                silence_threshold_dbfs=(
+                    args.silence_threshold_dbfs
+                ),
+                audio_loss_duration=args.audio_loss_duration,
+                audio_track_index=args.audio_track_index,
+                max_concurrent_media_processes=args.max_media_processes,
             )
         )
         if args.console:

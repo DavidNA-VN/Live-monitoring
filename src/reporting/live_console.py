@@ -304,6 +304,29 @@ class LiveAlertConsole:
 
             return
 
+        if event_type == "AUDIO_LOSS":
+            duration = fields.get(
+                "duration",
+                "?",
+            )
+            reason = fields.get(
+                "reason",
+                "unknown",
+            )
+
+            print(
+                (
+                    f"[AUDIO_LOSS:{state}] "
+                    f"variant={variant} "
+                    f"duration={duration}s "
+                    f"reason={reason} "
+                    f"event={event_id}"
+                ),
+                flush=True,
+            )
+
+            return
+
         if (
             event_type
             == "REPEATED_BLACK_SCREEN"

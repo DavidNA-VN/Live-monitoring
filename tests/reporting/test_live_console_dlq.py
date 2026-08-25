@@ -76,3 +76,21 @@ def test_poison_message_moves_to_bounded_dlq_at_delivery_limit():
     assert redis.pipeline_instance.acks == [
         ("outbox", "live-console-v1", "1-0")
     ]
+
+
+def test_console_prints_audio_loss_from_canonical_fields(capsys):
+    LiveAlertConsole._print_alert(
+        {
+            "type": "AUDIO_LOSS",
+            "state": "OPEN",
+            "variant_id": "720p",
+            "duration": "30.000000",
+            "reason": "continuous_silence",
+            "event_id": "audio-event-1",
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "[AUDIO_LOSS:OPEN]" in output
+    assert "variant=720p" in output
+    assert "reason=continuous_silence" in output

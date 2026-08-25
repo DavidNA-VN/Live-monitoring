@@ -181,6 +181,18 @@ def parse_media_playlist(
                     )
                 ),
                 has_video=variant.has_video,
+                audio_track_hint=(
+                    variant.audio_track_hint
+                ),
+                rendition_kind=variant.rendition_kind,
+                audio_group=variant.audio_group,
+                rendition_name=variant.rendition_name,
+                language=variant.language,
+                rendition_default=variant.is_default,
+                rendition_autoselect=variant.autoselect,
+                hls_stable_rendition_id=(
+                    variant.hls_stable_rendition_id
+                ),
             )
         )
 

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from threading import BoundedSemaphore, Event, Thread
+from threading import Event, Thread
 from datetime import datetime, timezone
 from time import monotonic
 
 from core.analysis_profile import AnalysisProfile, AnalysisResourceClass
 from core.redis_client import RedisUnavailableError
 from core.metrics import RuntimeMetricCollector
+from core.media_process_budget import ProcessGate
 from core.segment_admission import ProfileSegmentIdentity
 from core.segment_processor import SegmentProcessor
 from core.segment_state import RedisSegmentStateStore, SegmentLeaseLostError
@@ -44,7 +45,7 @@ class ProfileWorkerCoordinator:
         self,
         state_store: RedisSegmentStateStore,
         metrics: RuntimeMetricCollector | None = None,
-        media_process_gate: BoundedSemaphore | None = None,
+        media_process_gate: ProcessGate | None = None,
     ) -> None:
         self.state_store = state_store
         self.metrics = metrics or RuntimeMetricCollector()
@@ -69,14 +70,16 @@ class ProfileWorkerCoordinator:
                 analysis = self._analyze(
                     profile, item.segment, claimed, blocked_processors
                 )
-                video = analysis.video_realtime if analysis else None
                 self.metrics.record_analysis(
                     duration_seconds=monotonic() - analysis_started,
                     segment_age_seconds=self._segment_age(item.segment),
-                    ffmpeg_timed_out=bool(video and video.timed_out),
+                    ffmpeg_timed_out=bool(
+                        analysis and analysis.media_process_timed_out
+                    ),
                 )
                 if analysis is None:
                     continue
+                self.metrics.record_profile_result(analysis)
                 for processor, claim in claimed:
                     if not self._process_claimed_segment(
                         processor, item.segment, claim, analysis

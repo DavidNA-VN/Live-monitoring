@@ -15,10 +15,15 @@ class BlackScreenRedisKeys:
             f"variant:{variant_stable_id}:open"
         )
 
-    def event(self, stream_id: str, event_id: str) -> str:
+    def event(
+        self,
+        stream_id: str,
+        variant_stable_id: str,
+        event_id: str,
+    ) -> str:
         return (
             f"{self.prefix}:stream:{stream_id}:black:"
-            f"event:{event_id}:details"
+            f"variant:{variant_stable_id}:event:{event_id}:details"
         )
 
     def event_lock(self, stream_id: str, variant_stable_id: str) -> str:

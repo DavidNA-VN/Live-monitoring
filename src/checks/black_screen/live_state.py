@@ -195,7 +195,9 @@ class RedisBlackEventStore:
                 event=event,
                 payload=self.repository.encode(event),
                 event_key=self.keys.event(
-                    self.stream_id, event.event_id
+                    self.stream_id,
+                    event.variant_stable_id,
+                    event.event_id,
                 ),
                 open_key=self.keys.open_event(
                     self.stream_id, event.variant_stable_id

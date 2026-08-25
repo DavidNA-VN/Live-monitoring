@@ -5,6 +5,7 @@ __pycache__/
 
 .pytest_cache/
 .pytest-tmp-*/
+.phase6-fixture-*/
 .venv/
 .env
 .env.*

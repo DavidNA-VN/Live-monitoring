@@ -9,11 +9,13 @@ from core.profile_scheduler import ProfileScheduler
 from core.analysis_profile import AnalysisResourceClass
 from models.analysis import (
     AnalysisRequirement,
+    AudioRealtimeAnalysis,
     ResourcePoolLimit,
     SegmentAnalysisBundle,
     VideoRealtimeAnalysis,
     default_resource_limits,
 )
+from models.audio import AudioTrackPresence
 from models.stream import StreamIdentity
 from tests.factories.hls import make_segment
 
@@ -132,27 +134,48 @@ def test_explicit_resource_limits_do_not_multiply_one_decode_budget():
 
 
 def test_global_media_process_gate_caps_cross_pool_analysis():
-    class ConcurrentProfile:
-        resource_class = AnalysisResourceClass.AUDIO_DECODE
-
+    class ActiveTracker:
         def __init__(self):
             self.lock = Lock()
             self.active = 0
             self.max_active = 0
 
-        def analyze(self, _segment, *, requirements):
+        def enter(self):
             with self.lock:
                 self.active += 1
                 self.max_active = max(self.max_active, self.active)
-            sleep(0.03)
+
+        def leave(self):
             with self.lock:
                 self.active -= 1
+
+    class ConcurrentProfile:
+        def __init__(self, resource_class, tracker):
+            self.resource_class = resource_class
+            self.tracker = tracker
+
+        def analyze(self, _segment, *, requirements):
+            self.tracker.enter()
+            sleep(0.03)
+            self.tracker.leave()
+            if self.resource_class is AnalysisResourceClass.AUDIO_DECODE:
+                return SegmentAnalysisBundle(
+                    profile_name="audio_realtime",
+                    audio_realtime=AudioRealtimeAnalysis(
+                        checked=True,
+                        presence=AudioTrackPresence.PRESENT,
+                    ),
+                )
             return SegmentAnalysisBundle(
-                profile_name="audio_realtime",
+                profile_name="video_realtime",
                 video_realtime=VideoRealtimeAnalysis(checked=True),
             )
 
-    profile = ConcurrentProfile()
+    tracker = ActiveTracker()
+    profiles = (
+        ConcurrentProfile(AnalysisResourceClass.VIDEO_DECODE, tracker),
+        ConcurrentProfile(AnalysisResourceClass.AUDIO_DECODE, tracker),
+    )
     processor = FakeProcessor()
     coordinator = ProfileWorkerCoordinator(
         FakeStateStore(),
@@ -161,7 +184,7 @@ def test_global_media_process_gate_caps_cross_pool_analysis():
 
     def analyze(index):
         return coordinator._analyze(
-            profile,
+            profiles[index % 2],
             make_segment(index),
             [(processor, None)],
             set(),
@@ -170,4 +193,4 @@ def test_global_media_process_gate_caps_cross_pool_analysis():
     with ThreadPoolExecutor(max_workers=5) as executor:
         list(executor.map(analyze, range(5)))
 
-    assert profile.max_active == 2
+    assert tracker.max_active == 2

@@ -5,7 +5,9 @@ import pytest
 
 from playlist import media_parser
 from playlist.master_parser import Variant
+from models.rendition import MediaRenditionKind
 import m3u8
+from models.audio import AudioTrackHint
 
 
 def test_parse_media_playlist_copies_program_date_time(
@@ -52,6 +54,7 @@ def test_parse_media_playlist_copies_program_date_time(
         uri="http://example.test/playlist.m3u8",
         bandwidth=1_000_000,
         resolution=(1280, 720),
+        audio_track_hint=AudioTrackHint.MUXED,
     )
 
     snapshot = media_parser.parse_media_playlist(
@@ -63,6 +66,7 @@ def test_parse_media_playlist_copies_program_date_time(
     assert snapshot.variant_stable_id == "v720"
     assert segments[0].sequence == 42
     assert segments[0].program_date_time == program_date_time
+    assert segments[0].audio_track_hint is AudioTrackHint.MUXED
 
 
 def test_parse_media_playlist_normalizes_hls_media_metadata(
@@ -190,3 +194,45 @@ segment.m4s
     assert snapshot.segments[0].uri.endswith(
         "segment.m4s"
     )
+
+
+def test_audio_rendition_metadata_is_propagated_to_segments(monkeypatch):
+    playlist = m3u8.loads(
+        """#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXTINF:2,
+audio.ts
+""",
+        uri="https://media.test/audio/en.m3u8",
+    )
+    monkeypatch.setattr(
+        media_parser.m3u8,
+        "load",
+        lambda _uri, timeout: playlist,
+    )
+    rendition = Variant(
+        id="audio:main:English",
+        stable_id="audio-en",
+        uri="https://media.test/audio/en.m3u8",
+        bandwidth=None,
+        resolution=None,
+        has_video=False,
+        audio_track_hint=AudioTrackHint.MUXED,
+        rendition_kind=MediaRenditionKind.AUDIO,
+        audio_group="main",
+        rendition_name="English",
+        language="en",
+        is_default=True,
+        autoselect=True,
+        hls_stable_rendition_id="audio-en-v1",
+    )
+
+    segment = media_parser.parse_media_playlist(rendition).segments[0]
+
+    assert segment.rendition_kind is MediaRenditionKind.AUDIO
+    assert segment.audio_group == "main"
+    assert segment.rendition_name == "English"
+    assert segment.language == "en"
+    assert segment.rendition_default is True
+    assert segment.rendition_autoselect is True
+    assert segment.hls_stable_rendition_id == "audio-en-v1"

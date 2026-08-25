@@ -1,4 +1,12 @@
 from core.metrics import RuntimeMetricCollector
+from models.analysis import (
+    AudioRealtimeAnalysis,
+    SegmentAnalysisBundle,
+    VideoRealtimeAnalysis,
+)
+from models.audio import AudioTrackPresence
+from models.analysis import AnalysisRequirement
+from models.audio import SilenceInterval
 
 
 def test_metric_collector_drains_async_worker_metrics_per_cycle():
@@ -23,3 +31,69 @@ def test_metric_collector_drains_async_worker_metrics_per_cycle():
     assert snapshot.ffmpeg_timeout_total == 1
     assert snapshot.retry_total == 1
     assert collector.drain().analysis_count == 0
+
+
+def test_audio_operational_metrics_distinguish_loss_from_analysis_failure():
+    collector = RuntimeMetricCollector()
+    collector.record_profile_result(
+        SegmentAnalysisBundle(
+            profile_name="audio_realtime",
+            audio_realtime=AudioRealtimeAnalysis(
+                checked=True,
+                presence=AudioTrackPresence.PRESENT,
+                outputs={
+                    AnalysisRequirement.SILENCE_INTERVALS: (
+                        SilenceInterval(start=0.0, end=1.5),
+                    )
+                },
+            ),
+        )
+    )
+    collector.record_profile_result(
+        SegmentAnalysisBundle(
+            profile_name="audio_realtime",
+            audio_realtime=AudioRealtimeAnalysis(
+                checked=True,
+                presence=AudioTrackPresence.ABSENT,
+            ),
+        )
+    )
+    collector.record_profile_result(
+        SegmentAnalysisBundle(
+            profile_name="audio_realtime",
+            audio_realtime=AudioRealtimeAnalysis(
+                checked=False,
+                presence=AudioTrackPresence.UNKNOWN,
+                timed_out=True,
+            ),
+        )
+    )
+
+    snapshot = collector.drain()
+
+    assert snapshot.audio_analysis_total == 3
+    assert snapshot.audio_analysis_failure_total == 1
+    assert snapshot.audio_analysis_timeout_total == 1
+    assert snapshot.audio_track_missing_total == 1
+    assert snapshot.audio_silence_seconds_total == 1.5
+
+
+def test_analysis_bundle_reports_timeout_from_either_media_profile():
+    video = SegmentAnalysisBundle(
+        profile_name="video_realtime",
+        video_realtime=VideoRealtimeAnalysis(
+            checked=False,
+            timed_out=True,
+        ),
+    )
+    audio = SegmentAnalysisBundle(
+        profile_name="audio_realtime",
+        audio_realtime=AudioRealtimeAnalysis(
+            checked=False,
+            presence=AudioTrackPresence.UNKNOWN,
+            timed_out=True,
+        ),
+    )
+
+    assert video.media_process_timed_out is True
+    assert audio.media_process_timed_out is True

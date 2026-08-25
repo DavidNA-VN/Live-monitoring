@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import math
 from types import MappingProxyType
 
 from models.analysis import (
@@ -29,6 +30,11 @@ class StreamConfig:
     max_segments_per_batch: int = 20
     media_playlist_workers: int = 4
     alert_stream_max_length: int = 10_000
+    black_screen_enabled: bool = True
+    audio_loss_enabled: bool = True
+    silence_threshold_dbfs: float = -60.0
+    audio_loss_duration: float = 30.0
+    audio_track_index: int = 0
 
     def __post_init__(self) -> None:
         if not self.master_url.strip():
@@ -47,6 +53,22 @@ class StreamConfig:
         for name, value in positive.items():
             if value <= 0:
                 raise ValueError(f"{name} must be > 0")
+        if not self.black_screen_enabled and not self.audio_loss_enabled:
+            raise ValueError("At least one monitoring check must be enabled")
+        if (
+            not math.isfinite(self.silence_threshold_dbfs)
+            or self.silence_threshold_dbfs > 0
+        ):
+            raise ValueError(
+                "silence_threshold_dbfs must be finite and <= 0"
+            )
+        if (
+            not math.isfinite(self.audio_loss_duration)
+            or self.audio_loss_duration <= 0
+        ):
+            raise ValueError("audio_loss_duration must be finite and > 0")
+        if self.audio_track_index < 0:
+            raise ValueError("audio_track_index must be >= 0")
         normalized_limits = {}
         for resource_class, limit in self.resource_limits.items():
             normalized_class = AnalysisResourceClass(resource_class)
