@@ -3,19 +3,17 @@ import logging
 import signal
 from threading import Event, Thread
 
-from app.monitoring_session_factory import MonitoringSessionFactory
+from app.monitoring_worker import MonitoringWorkerApplication
 from core.redis_client import RedisClient
+from core.redis_keys import RedisNamespace
 from core.stream_session import StreamSessionStatus
-from core.stream_supervisor import StreamSupervisor
 from models.stream_config import StreamConfig
 from reporting.live_console import LiveAlertConsole
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--url", required=True, help="Live HLS master playlist URL"
-    )
+    parser.add_argument("--url", help="Optional initial live HLS master URL")
     parser.add_argument(
         "--stream-id",
         default=None,
@@ -66,7 +64,20 @@ def parse_args(argv=None):
         default=8,
         help="Service-wide concurrent FFmpeg process budget",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--command-worker",
+        action="store_true",
+        help="Consume monitoring lifecycle commands from Redis",
+    )
+    parser.add_argument("--max-streams", type=int, default=16)
+    parser.add_argument("--redis-prefix", default="media-monitor:v1")
+    parser.add_argument("--consumer-name", default=None)
+    args = parser.parse_args(argv)
+    if not args.url and not args.command_worker:
+        parser.error("one of --url or --command-worker is required")
+    if args.max_streams <= 0:
+        parser.error("--max-streams must be > 0")
+    return args
 
 
 def main():
@@ -78,17 +89,16 @@ def main():
     )
     args = parse_args()
     shutdown_event = Event()
-    supervisor = StreamSupervisor(
-        session_factory=MonitoringSessionFactory(
-            max_concurrent_media_processes=(
-                args.max_service_media_processes
-            )
-        ),
-        max_streams=1,
+    application = MonitoringWorkerApplication(
+        namespace=RedisNamespace(args.redis_prefix),
+        max_streams=args.max_streams,
+        max_concurrent_media_processes=args.max_service_media_processes,
+        consumer_name=args.consumer_name,
     )
     console_client = None
     console_thread = None
     console_stop = Event()
+    command_thread = None
 
     def shutdown_handler(_signum, _frame):
         shutdown_event.set()
@@ -97,8 +107,10 @@ def main():
     signal.signal(signal.SIGTERM, shutdown_handler)
 
     try:
-        stream_id = supervisor.add(
-            StreamConfig(
+        application.ping()
+        stream_id = None
+        if args.url:
+            result = application.control.start(StreamConfig(
                 master_url=args.url,
                 stream_id=args.stream_id,
                 black_screen_enabled=(
@@ -113,8 +125,16 @@ def main():
                 audio_loss_duration=args.audio_loss_duration,
                 audio_track_index=args.audio_track_index,
                 max_concurrent_media_processes=args.max_media_processes,
+            ))
+            stream_id = result.stream_id
+        if args.command_worker:
+            command_thread = Thread(
+                target=application.run_commands,
+                args=(shutdown_event,),
+                name="monitoring-command-consumer",
+                daemon=False,
             )
-        )
+            command_thread.start()
         if args.console:
             console_client = RedisClient()
             console_client.ping()
@@ -128,14 +148,18 @@ def main():
             console_thread.start()
 
         while not shutdown_event.wait(1.0):
-            status = supervisor.snapshots()[stream_id].status
-            if status in (
-                StreamSessionStatus.FAILED,
-                StreamSessionStatus.STOPPED,
-            ):
-                break
+            if stream_id is not None and not args.command_worker:
+                snapshot = application.supervisor.snapshot(stream_id)
+                if snapshot is None or snapshot.status in (
+                    StreamSessionStatus.FAILED,
+                    StreamSessionStatus.STOPPED,
+                ):
+                    break
     finally:
-        supervisor.stop_all()
+        shutdown_event.set()
+        if command_thread is not None:
+            command_thread.join(timeout=2.0)
+        application.close()
         console_stop.set()
         if console_thread is not None:
             console_thread.join(timeout=2.0)

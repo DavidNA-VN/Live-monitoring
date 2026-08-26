@@ -14,6 +14,7 @@ def test_all_mvp_contracts_use_schema_version_1():
     names = (
         "stream-config.schema.json",
         "monitoring-command.schema.json",
+        "monitoring-command-result.schema.json",
         "runtime-status.schema.json",
         "alert.schema.json",
     )
@@ -74,6 +75,17 @@ def test_monitoring_commands_cover_mvp_lifecycle():
         "RESUME",
         "STOP",
         "UPDATE_CONFIG",
+    ]
+
+    result_schema = load_schema("monitoring-command-result.schema.json")
+    assert result_schema["properties"]["command_type"]["enum"] == schema[
+        "properties"
+    ]["command_type"]["enum"]
+    assert result_schema["properties"]["status"]["enum"] == [
+        "APPLIED",
+        "NOOP",
+        "REJECTED",
+        "FAILED",
     ]
 
 

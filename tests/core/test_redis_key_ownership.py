@@ -2,6 +2,7 @@ from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from checks.audio_loss.redis_keys import AudioLossRedisKeys
 from core.redis_keys import (
     AlertRedisKeys,
+    ControlRedisKeys,
     ProcessingRedisKeys,
     RedisNamespace,
     RuntimeRedisKeys,
@@ -14,17 +15,20 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     processing = ProcessingRedisKeys(namespace)
     runtime = RuntimeRedisKeys(namespace)
     alerts = AlertRedisKeys(namespace)
+    control = ControlRedisKeys(namespace)
     black = BlackScreenRedisKeys(namespace)
     audio = AudioLossRedisKeys(namespace)
 
     assert processing.namespace is namespace
     assert runtime.namespace is namespace
     assert alerts.namespace is namespace
+    assert control.namespace is namespace
     assert black.namespace is namespace
     assert audio.namespace is namespace
     assert not hasattr(processing, "open_event")
     assert not hasattr(runtime, "segment_state")
     assert not hasattr(alerts, "health")
+    assert not hasattr(control, "segment_state")
     assert not hasattr(black, "outbox")
     assert not hasattr(audio, "outbox")
 
@@ -34,6 +38,7 @@ def test_core_key_schemas_are_stable():
     processing = ProcessingRedisKeys(namespace)
     runtime = RuntimeRedisKeys(namespace)
     alerts = AlertRedisKeys(namespace)
+    control = ControlRedisKeys(namespace)
     identity = SegmentProcessingIdentity(
         storage_id="stream-1",
         check_name="black_screen",
@@ -59,6 +64,13 @@ def test_core_key_schemas_are_stable():
     )
     assert alerts.outbox() == "monitor:test:alerts:outbox"
     assert alerts.dead_letter() == "monitor:test:alerts:dead-letter"
+    assert control.commands() == "monitor:test:monitoring:commands"
+    assert control.command_results() == (
+        "monitor:test:monitoring:command-results"
+    )
+    assert control.dead_letter() == (
+        "monitor:test:monitoring:command-dead-letter"
+    )
 
 
 def test_black_screen_key_schemas_stay_inside_check_package():

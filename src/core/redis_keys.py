@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from hashlib import sha256
 
 from models.processing import SegmentProcessingIdentity
 
@@ -85,3 +86,25 @@ class AlertRedisKeys:
 
     def dead_letter(self) -> str:
         return f"{self.prefix}:alerts:dead-letter"
+
+
+class ControlRedisKeys:
+    def __init__(self, namespace: RedisNamespace | None = None) -> None:
+        self.namespace = namespace or RedisNamespace()
+
+    @property
+    def prefix(self) -> str:
+        return self.namespace.prefix
+
+    def commands(self) -> str:
+        return f"{self.prefix}:monitoring:commands"
+
+    def command_results(self) -> str:
+        return f"{self.prefix}:monitoring:command-results"
+
+    def dead_letter(self) -> str:
+        return f"{self.prefix}:monitoring:command-dead-letter"
+
+    def processed_command(self, command_id: str) -> str:
+        digest = sha256(command_id.encode("utf-8")).hexdigest()[:32]
+        return f"{self.prefix}:monitoring:processed:{digest}"

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/monitoring-command-result.schema.json",
+  "title": "MonitoringCommandResultDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "command_id",
+    "command_type",
+    "stream_id",
+    "status",
+    "changed",
+    "processed_at",
+    "error_code",
+    "error"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "command_id": {"type": "string", "minLength": 1},
+    "command_type": {
+      "enum": ["START", "PAUSE", "RESUME", "STOP", "UPDATE_CONFIG"]
+    },
+    "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "status": {"enum": ["APPLIED", "NOOP", "REJECTED", "FAILED"]},
+    "changed": {"type": "boolean"},
+    "processed_at": {"type": "string", "format": "date-time"},
+    "error_code": {"type": ["string", "null"]},
+    "error": {"type": ["string", "null"]}
+  }
+}
