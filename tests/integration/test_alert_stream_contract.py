@@ -7,7 +7,10 @@ import pytest
 from core.alert_stream import RedisAlertStream
 from core.redis_client import RedisClient, RedisSettings
 from core.redis_keys import AlertRedisKeys, RedisNamespace, RuntimeRedisKeys
-from core.runtime_health import RedisRuntimeHealthReporter
+from core.runtime_health import (
+    RedisRuntimeHealthReporter,
+    runtime_health_event_id,
+)
 from models.alert import AlertCategory, AlertEnvelope
 from models.runtime import LiveCycleStats
 
@@ -48,6 +51,7 @@ def redis_context():
 def test_alert_stream_is_bounded_and_schema_is_consumable(redis_context):
     client, alert_keys, runtime_keys = redis_context
     stream = RedisAlertStream(
+        storage_id="storage-1",
         alert_keys=alert_keys,
         runtime_keys=runtime_keys,
         max_length=5,
@@ -64,7 +68,7 @@ def test_alert_stream_is_bounded_and_schema_is_consumable(redis_context):
                 category=AlertCategory.CONTENT,
                 event_type="BLACK_SCREEN",
                 state="OPEN",
-                stream_id="stream-1",
+                stream_id="channel-01",
                 occurred_at=now,
                 emitted_at=now,
                 reason="test",
@@ -76,8 +80,10 @@ def test_alert_stream_is_bounded_and_schema_is_consumable(redis_context):
     _, latest = client.client.xrevrange(
         alert_keys.outbox(), count=1
     )[0]
-    assert AlertEnvelope.from_redis_fields(latest).event_id == "event-11"
-    metrics = client.client.hgetall(runtime_keys.metrics("stream-1"))
+    decoded_latest = AlertEnvelope.from_redis_fields(latest)
+    assert decoded_latest.event_id == "event-11"
+    assert decoded_latest.stream_id == "channel-01"
+    metrics = client.client.hgetall(runtime_keys.metrics("storage-1"))
     assert metrics["alert_total"] == "12"
     assert metrics["alert_content_total"] == "12"
 
@@ -85,7 +91,8 @@ def test_alert_stream_is_bounded_and_schema_is_consumable(redis_context):
 def test_runtime_health_uses_same_versioned_envelope(redis_context):
     client, alert_keys, runtime_keys = redis_context
     reporter = RedisRuntimeHealthReporter(
-        stream_id="stream-1",
+        storage_id="storage-1",
+        external_stream_id="channel-01",
         redis_client=client,
         runtime_keys=runtime_keys,
         alert_keys=alert_keys,
@@ -101,7 +108,9 @@ def test_runtime_health_uses_same_versioned_envelope(redis_context):
     assert decoded.category == AlertCategory.RUNTIME
     assert decoded.event_type == "RUNTIME_HEALTH"
     assert decoded.state == "DEGRADED"
-    assert decoded.event_id == "runtime-health:stream-1"
+    assert decoded.stream_id == "channel-01"
+    assert decoded.event_id == runtime_health_event_id("storage-1")
+    assert "storage-1" not in decoded.event_id
 
     reporter.publish(
         LiveCycleStats(
@@ -115,3 +124,4 @@ def test_runtime_health_uses_same_versioned_envelope(redis_context):
     recovered = AlertEnvelope.from_redis_fields(recovered_fields)
     assert recovered.state == "RECOVERED"
     assert recovered.reason == "runtime_recovered"
+    assert recovered.stream_id == "channel-01"

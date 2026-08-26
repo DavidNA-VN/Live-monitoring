@@ -89,7 +89,8 @@ def result(segment, *intervals):
 
 def store(client, keys, *, policy=None):
     return RedisBlackEventStore(
-        stream_id="stream-1",
+        storage_id="stream-1",
+        external_stream_id="channel-01",
         redis_client=client,
         black_keys=keys.black,
         alert_keys=keys.alert,

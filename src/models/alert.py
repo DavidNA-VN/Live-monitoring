@@ -28,6 +28,7 @@ class AlertEnvelope:
     reason: str
     check: str | None = None
     variant_id: str | None = None
+    variant_stable_id: str | None = None
     event_started_at: datetime | None = None
     event_ended_at: datetime | None = None
     attributes: dict[str, str] = field(default_factory=dict)
@@ -57,6 +58,8 @@ class AlertEnvelope:
             fields["check"] = self.check
         if self.variant_id is not None:
             fields["variant_id"] = self.variant_id
+        if self.variant_stable_id is not None:
+            fields["variant_stable_id"] = self.variant_stable_id
         if self.event_started_at is not None:
             fields["event_started_at"] = self._time(
                 self.event_started_at
@@ -107,6 +110,7 @@ class AlertEnvelope:
             reason=fields["reason"],
             check=fields.get("check"),
             variant_id=fields.get("variant_id"),
+            variant_stable_id=fields.get("variant_stable_id"),
             event_started_at=cls._optional_time(
                 fields.get("event_started_at")
             ),

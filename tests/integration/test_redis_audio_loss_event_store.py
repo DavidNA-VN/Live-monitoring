@@ -59,7 +59,8 @@ def redis_context():
 
 def store(client, keys):
     return RedisAudioLossEventStore(
-        stream_id="stream-1",
+        storage_id="stream-1",
+        external_stream_id="channel-01",
         redis_client=client,
         audio_keys=keys.audio,
         alert_keys=keys.alert,

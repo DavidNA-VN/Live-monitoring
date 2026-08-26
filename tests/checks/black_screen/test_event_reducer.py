@@ -31,7 +31,9 @@ def reduce(reducer, segment, *intervals, open_event=None):
 
 
 def test_no_black_without_open_event_only_marks_segment_committed():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
 
     transitions = reduce(reducer, make_segment(10))
 
@@ -44,7 +46,9 @@ def test_no_black_without_open_event_only_marks_segment_committed():
 
 
 def test_short_interval_is_created_and_resolved_in_same_segment():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     started_at = datetime(2026, 8, 20, tzinfo=timezone.utc)
     segment = make_segment(
         10,
@@ -62,7 +66,7 @@ def test_short_interval_is_created_and_resolved_in_same_segment():
     assert transition.type == BlackEventTransitionType.RESOLVE
     assert transition.reason == "video_returned"
     assert transition.commits_segment is True
-    assert event.stream_id == "stream-1"
+    assert event.stream_id == "channel-01"
     assert event.start_sequence == 10
     assert event.end_sequence == 10
     assert event.duration == pytest.approx(1.5)
@@ -76,7 +80,9 @@ def test_short_interval_is_created_and_resolved_in_same_segment():
 
 
 def test_black_reaching_segment_end_stays_open():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     segment = make_segment(10, duration=6.0)
 
     transitions = reduce(
@@ -91,10 +97,13 @@ def test_black_reaching_segment_end_stays_open():
     )
     assert transition.commits_segment is True
     assert transition.event.duration == pytest.approx(3.95)
+    assert transition.event.stream_id == "channel-01"
 
 
 def test_open_event_extends_across_adjacent_segment_boundary():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     first = make_segment(10, duration=6.0)
     opened = reduce(
         reducer,
@@ -114,6 +123,7 @@ def test_open_event_extends_across_adjacent_segment_boundary():
     assert transitions[0].type == (
         BlackEventTransitionType.PERSIST_OPEN
     )
+    assert event.stream_id == "channel-01"
     assert event.start_sequence == 10
     assert event.end_sequence == 11
     assert event.duration == pytest.approx(7.95)
@@ -121,7 +131,9 @@ def test_open_event_extends_across_adjacent_segment_boundary():
 
 
 def test_reducer_does_not_mutate_loaded_open_event():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     first = make_segment(10)
     opened = reduce(
         reducer,
@@ -157,7 +169,9 @@ def test_gap_or_discontinuity_resolves_previous_event(
     segment,
     reason,
 ):
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     opened = reduce(
         reducer,
         make_segment(10),
@@ -180,7 +194,9 @@ def test_gap_or_discontinuity_resolves_previous_event(
 
 
 def test_intervals_are_reduced_in_start_order():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     segment = make_segment(10)
 
     transitions = reduce(
@@ -199,11 +215,13 @@ def test_intervals_are_reduced_in_start_order():
 
 
 def test_same_segment_overlap_only_adds_new_black_duration():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     segment = make_segment(10)
     open_event = BlackLiveEvent(
         event_id="event-1",
-        stream_id="stream-1",
+        stream_id="storage-1",
         variant_id=segment.variant_id,
         variant_stable_id=segment.variant_stable_id,
         discontinuity_sequence=0,
@@ -227,6 +245,40 @@ def test_same_segment_overlap_only_adds_new_black_duration():
 
     assert transition.type == BlackEventTransitionType.RESOLVE
     assert transition.event.duration == pytest.approx(3.0)
+    assert transition.event.stream_id == "channel-01"
+
+
+def test_reducer_normalizes_legacy_open_event_stream_id():
+    reducer = BlackEventReducer(
+        storage_id="storage-1",
+        external_stream_id="channel-01",
+    )
+    legacy_event = BlackLiveEvent(
+        event_id="legacy-event-id",
+        stream_id="legacy-hash-id",
+        variant_id="720p",
+        variant_stable_id="v720",
+        discontinuity_sequence=0,
+        start_sequence=10,
+        end_sequence=10,
+        start_offset=0.0,
+        end_offset=6.0,
+        start_program_time=None,
+        end_program_time=None,
+        duration=6.0,
+        last_segment_duration=6.0,
+        affected_segments=[10],
+    )
+    segment = make_segment(11, duration=6.0)
+    transitions = reduce(
+        reducer,
+        segment,
+        BlackInterval(start=0.0, end=6.0),
+        open_event=legacy_event,
+    )
+    assert len(transitions) == 1
+    assert transitions[0].event.stream_id == "channel-01"
+    assert transitions[0].event.event_id == "legacy-event-id"
 
 
 def test_negative_boundary_tolerance_is_rejected():
@@ -235,6 +287,7 @@ def test_negative_boundary_tolerance_is_rejected():
         match="boundary_tolerance",
     ):
         BlackEventReducer(
-            stream_id="stream-1",
+            storage_id="storage-1",
+            external_stream_id="channel-01",
             boundary_tolerance=-0.01,
         )

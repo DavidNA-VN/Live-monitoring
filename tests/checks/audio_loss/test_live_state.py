@@ -109,7 +109,8 @@ def context():
 def store(context, *, duration=30.0):
     wrapper, _client, audio_keys, alert_keys, runtime_keys = context
     return RedisAudioLossEventStore(
-        stream_id="stream-1",
+        storage_id="stream-1",
+        external_stream_id="channel-01",
         redis_client=wrapper,
         policy=AudioLossAlertPolicy(alert_duration=duration),
         audio_keys=audio_keys,
@@ -156,6 +157,7 @@ def test_restart_recovery_and_segment_retry_are_idempotent(context):
     )
 
     assert [alert.state for alert in client.alerts] == ["OPEN"]
+    assert client.alerts[0].stream_id == "channel-01"
     assert client.alerts[0].attributes["affected_segment_count"] == "15"
 
     restarted = store(context)
@@ -221,7 +223,7 @@ def test_two_variants_keep_independent_state_and_alert_identity(context):
     assert len(client.alerts) == 2
     assert client.alerts[0].event_id != client.alerts[1].event_id
     assert {
-        alert.attributes["variant_stable_id"] for alert in client.alerts
+        alert.variant_stable_id for alert in client.alerts
     } == {"stable-720", "stable-1080"}
 
 

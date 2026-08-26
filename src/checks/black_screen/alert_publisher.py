@@ -18,14 +18,17 @@ class BlackAlertPublisher:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
+        external_stream_id: str,
         alert_keys: AlertRedisKeys,
         runtime_keys: RuntimeRedisKeys,
         stream_max_length: int = 10_000,
         alert_sink: AlertSink | None = None,
     ) -> None:
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.stream = alert_sink or RedisAlertStream(
+            storage_id=storage_id,
             alert_keys=alert_keys,
             runtime_keys=runtime_keys,
             max_length=stream_max_length,
@@ -50,7 +53,7 @@ class BlackAlertPublisher:
         }
         envelope = AlertEnvelope(
             alert_id=deterministic_alert_id(
-                stream_id=self.stream_id,
+                stream_id=self.storage_id,
                 event_id=event.event_id,
                 state=state,
                 reason=reason,
@@ -60,9 +63,10 @@ class BlackAlertPublisher:
             category=AlertCategory.CONTENT,
             event_type="BLACK_SCREEN",
             state=state,
-            stream_id=self.stream_id,
+            stream_id=self.external_stream_id,
             check="black_screen",
             variant_id=event.variant_id,
+            variant_stable_id=event.variant_stable_id,
             occurred_at=event.end_program_time
             or event.start_program_time
             or now,
@@ -82,6 +86,7 @@ class BlackAlertPublisher:
         *,
         alert: RepeatedBlackAlert,
         variant_id: str,
+        variant_stable_id: str | None = None,
         policy: BlackScreenAlertPolicy,
     ) -> None:
         now = datetime.now(timezone.utc)
@@ -94,7 +99,7 @@ class BlackAlertPublisher:
             attributes["window_seconds"] = str(policy.repeated_window)
         envelope = AlertEnvelope(
             alert_id=deterministic_alert_id(
-                stream_id=self.stream_id,
+                stream_id=self.storage_id,
                 event_id=alert.event_id,
                 state=alert.state.value,
                 reason=alert.reason,
@@ -104,9 +109,10 @@ class BlackAlertPublisher:
             category=AlertCategory.CONTENT,
             event_type="REPEATED_BLACK_SCREEN",
             state=alert.state.value,
-            stream_id=self.stream_id,
+            stream_id=self.external_stream_id,
             check="black_screen",
             variant_id=variant_id,
+            variant_stable_id=variant_stable_id,
             occurred_at=now,
             emitted_at=now,
             reason=alert.reason,

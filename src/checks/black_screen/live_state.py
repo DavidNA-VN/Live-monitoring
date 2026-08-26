@@ -33,7 +33,9 @@ class RedisBlackEventStore:
 
     def __init__(
         self,
-        stream_id: str,
+        *,
+        storage_id: str,
+        external_stream_id: str,
         redis_client: RedisClient,
         policy: BlackScreenAlertPolicy | None = None,
         black_keys: BlackScreenRedisKeys | None = None,
@@ -48,7 +50,8 @@ class RedisBlackEventStore:
         reducer: BlackEventReducer | None = None,
         repeated_reducer: RepeatedBlackReducer | None = None,
     ) -> None:
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.redis = redis_client.client
         self.policy = policy or BlackScreenAlertPolicy()
         namespace = (
@@ -59,18 +62,20 @@ class RedisBlackEventStore:
         self.runtime_keys = runtime_keys or RuntimeRedisKeys(namespace)
         self.event_lock_ms = event_lock_ms
         self.reducer = reducer or BlackEventReducer(
-            stream_id=stream_id,
+            storage_id=storage_id,
+            external_stream_id=external_stream_id,
             boundary_tolerance=boundary_tolerance,
         )
         alerts = BlackAlertPublisher(
-            stream_id=stream_id,
+            storage_id=storage_id,
+            external_stream_id=external_stream_id,
             alert_keys=self.alert_keys,
             runtime_keys=self.runtime_keys,
             stream_max_length=alert_stream_max_length,
             alert_sink=alert_sink,
         )
         self.repository = RedisBlackEventRepository(
-            stream_id=stream_id,
+            storage_id=storage_id,
             redis_client=self.redis,
             black_keys=self.keys,
             event_ttl_seconds=event_ttl_seconds,
@@ -78,7 +83,7 @@ class RedisBlackEventStore:
             alerts=alerts,
         )
         self.repeated_events = RedisRepeatedBlackRepository(
-            stream_id=stream_id,
+            storage_id=storage_id,
             redis_client=self.redis,
             policy=self.policy,
             black_keys=self.keys,
@@ -94,7 +99,7 @@ class RedisBlackEventStore:
         result: BlackDetectionResult,
     ) -> None:
         commit_key = self.keys.commit_marker(
-            self.stream_id,
+            self.storage_id,
             segment.variant_stable_id,
             segment.discontinuity_sequence,
             segment.sequence,
@@ -105,7 +110,7 @@ class RedisBlackEventStore:
             if self.redis.exists(commit_key):
                 return
             lock_key = self.keys.event_lock(
-                self.stream_id, segment.variant_stable_id
+                self.storage_id, segment.variant_stable_id
             )
             token = uuid4().hex
             acquired = self.redis.set(
@@ -195,12 +200,12 @@ class RedisBlackEventStore:
                 event=event,
                 payload=self.repository.encode(event),
                 event_key=self.keys.event(
-                    self.stream_id,
+                    self.storage_id,
                     event.variant_stable_id,
                     event.event_id,
                 ),
                 open_key=self.keys.open_event(
-                    self.stream_id, event.variant_stable_id
+                    self.storage_id, event.variant_stable_id
                 ),
                 commit_key=commit_key,
             )

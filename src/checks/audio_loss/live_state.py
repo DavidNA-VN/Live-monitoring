@@ -29,7 +29,9 @@ class RedisAudioLossEventStore:
 
     def __init__(
         self,
-        stream_id: str,
+        *,
+        storage_id: str,
+        external_stream_id: str,
         redis_client: RedisClient,
         policy: AudioLossAlertPolicy | None = None,
         audio_keys: AudioLossRedisKeys | None = None,
@@ -46,7 +48,8 @@ class RedisAudioLossEventStore:
     ) -> None:
         if event_lock_ms <= 0:
             raise ValueError("event_lock_ms must be > 0")
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.redis = redis_client.client
         self.policy = policy or AudioLossAlertPolicy()
         namespace = (
@@ -57,11 +60,13 @@ class RedisAudioLossEventStore:
         self.runtime_keys = runtime_keys or RuntimeRedisKeys(namespace)
         self.event_lock_ms = event_lock_ms
         self.reducer = reducer or AudioLossEventReducer(
-            stream_id=stream_id,
+            storage_id=storage_id,
+            external_stream_id=external_stream_id,
             boundary_tolerance=boundary_tolerance,
         )
         alerts = AudioLossAlertPublisher(
-            stream_id=stream_id,
+            storage_id=storage_id,
+            external_stream_id=external_stream_id,
             alert_keys=self.alert_keys,
             runtime_keys=self.runtime_keys,
             threshold_dbfs=threshold_dbfs,
@@ -70,7 +75,7 @@ class RedisAudioLossEventStore:
             alert_sink=alert_sink,
         )
         self.repository = RedisAudioLossEventRepository(
-            stream_id=stream_id,
+            storage_id=storage_id,
             redis_client=self.redis,
             audio_keys=self.keys,
             event_ttl_seconds=event_ttl_seconds,
@@ -87,7 +92,7 @@ class RedisAudioLossEventStore:
         if not result.checked:
             raise ValueError("Unchecked audio-loss result cannot be committed")
         commit_key = self.keys.commit_marker(
-            self.stream_id,
+            self.storage_id,
             segment.variant_stable_id,
             segment.discontinuity_sequence,
             segment.sequence,
@@ -98,7 +103,7 @@ class RedisAudioLossEventStore:
             if self.redis.exists(commit_key):
                 return
             lock_key = self.keys.event_lock(
-                self.stream_id,
+                self.storage_id,
                 segment.variant_stable_id,
             )
             token = uuid4().hex

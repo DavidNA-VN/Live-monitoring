@@ -45,7 +45,8 @@ class BlackEventReducer:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
+        external_stream_id: str,
         boundary_tolerance: float = 0.10,
     ) -> None:
         if boundary_tolerance < 0:
@@ -53,7 +54,8 @@ class BlackEventReducer:
                 "boundary_tolerance must be >= 0"
             )
 
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.boundary_tolerance = boundary_tolerance
 
     def reduce(
@@ -65,6 +67,8 @@ class BlackEventReducer:
     ) -> list[BlackEventTransition]:
         transitions: list[BlackEventTransition] = []
         current = self._copy_event(open_event)
+        if current is not None:
+            current.stream_id = self.external_stream_id
 
         if (
             current is not None
@@ -265,7 +269,7 @@ class BlackEventReducer:
                 segment=segment,
                 start_offset=interval.start,
             ),
-            stream_id=self.stream_id,
+            stream_id=self.external_stream_id,
             variant_id=segment.variant_id,
             variant_stable_id=segment.variant_stable_id,
             discontinuity_sequence=(
@@ -338,7 +342,7 @@ class BlackEventReducer:
         start_offset: float,
     ) -> str:
         raw = (
-            f"{self.stream_id}|"
+            f"{self.storage_id}|"
             f"{segment.variant_stable_id}|"
             f"{segment.timeline_generation}|"
             f"{segment.discontinuity_sequence}|"

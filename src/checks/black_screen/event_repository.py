@@ -10,14 +10,14 @@ class RedisBlackEventRepository:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
         redis_client,
         black_keys: BlackScreenRedisKeys,
         event_ttl_seconds: int,
         commit_ttl_seconds: int,
         alerts: BlackAlertPublisher,
     ) -> None:
-        self.stream_id = stream_id
+        self.storage_id = storage_id
         self.redis = redis_client
         self.keys = black_keys
         self.event_ttl_seconds = event_ttl_seconds
@@ -30,7 +30,7 @@ class RedisBlackEventRepository:
 
     def load_open(self, variant_stable_id: str) -> BlackLiveEvent | None:
         raw = self.redis.get(
-            self.keys.open_event(self.stream_id, variant_stable_id)
+            self.keys.open_event(self.storage_id, variant_stable_id)
         )
         return self.codec.decode(raw) if raw else None
 
@@ -48,14 +48,14 @@ class RedisBlackEventRepository:
         pipeline = self.redis.pipeline(transaction=True)
         pipeline.set(
             self.keys.open_event(
-                self.stream_id, event.variant_stable_id
+                self.storage_id, event.variant_stable_id
             ),
             payload,
             ex=self.event_ttl_seconds,
         )
         pipeline.set(
             self.keys.event(
-                self.stream_id,
+                self.storage_id,
                 event.variant_stable_id,
                 event.event_id,
             ),
@@ -83,7 +83,7 @@ class RedisBlackEventRepository:
         pipeline = self.redis.pipeline(transaction=True)
         pipeline.set(
             self.keys.event(
-                self.stream_id,
+                self.storage_id,
                 event.variant_stable_id,
                 event.event_id,
             ),
@@ -92,7 +92,7 @@ class RedisBlackEventRepository:
         )
         pipeline.delete(
             self.keys.open_event(
-                self.stream_id, event.variant_stable_id
+                self.storage_id, event.variant_stable_id
             )
         )
         if alert_on_resolution:

@@ -20,7 +20,7 @@ class RedisRepeatedBlackRepository:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
         redis_client,
         policy: BlackScreenAlertPolicy,
         black_keys: BlackScreenRedisKeys,
@@ -29,7 +29,7 @@ class RedisRepeatedBlackRepository:
         alert_publisher: BlackAlertPublisher,
         reducer: RepeatedBlackReducer | None = None,
     ) -> None:
-        self.stream_id = stream_id
+        self.storage_id = storage_id
         self.redis = redis_client
         self.policy = policy
         self.keys = black_keys
@@ -100,6 +100,7 @@ class RedisRepeatedBlackRepository:
                 pipeline,
                 alert=reduction.alert,
                 variant_id=event.variant_id,
+                variant_stable_id=event.variant_stable_id,
                 policy=self.policy,
             )
         if commit_key is not None:
@@ -148,6 +149,7 @@ class RedisRepeatedBlackRepository:
                     pipeline,
                     alert=reduction.alert,
                     variant_id=segment.variant_id,
+                    variant_stable_id=segment.variant_stable_id,
                     policy=self.policy,
                 )
             pipeline.delete(
@@ -168,17 +170,17 @@ class RedisRepeatedBlackRepository:
     ):
         return (
             self.keys.short_history(
-                stream_id=self.stream_id,
+                stream_id=self.storage_id,
                 variant_stable_id=variant_stable_id,
                 timeline_generation=timeline_generation,
             ),
             self.keys.short_duration(
-                stream_id=self.stream_id,
+                stream_id=self.storage_id,
                 variant_stable_id=variant_stable_id,
                 timeline_generation=timeline_generation,
             ),
             self.keys.repeat_incident(
-                stream_id=self.stream_id,
+                stream_id=self.storage_id,
                 variant_stable_id=variant_stable_id,
                 timeline_generation=timeline_generation,
             ),

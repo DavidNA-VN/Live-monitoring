@@ -13,9 +13,10 @@ def envelope():
         category=AlertCategory.CONTENT,
         event_type="BLACK_SCREEN",
         state="OPEN",
-        stream_id="stream-1",
+        stream_id="channel-01",
         check="black_screen",
         variant_id="720p",
+        variant_stable_id="v720",
         occurred_at=now,
         emitted_at=now,
         reason="continuous_black",
@@ -25,12 +26,17 @@ def envelope():
 
 def test_alert_envelope_round_trips_without_terminal_parsing():
     original = envelope()
+    fields = original.to_redis_fields()
 
-    decoded = AlertEnvelope.from_redis_fields(
-        original.to_redis_fields()
-    )
+    assert "storage_id" not in fields
+    assert fields["variant_stable_id"] == "v720"
+    assert fields["stream_id"] == "channel-01"
+
+    decoded = AlertEnvelope.from_redis_fields(fields)
 
     assert decoded == original
+    assert decoded.stream_id == "channel-01"
+    assert decoded.variant_stable_id == "v720"
     assert decoded.schema_version == "1.0"
     assert decoded.attributes["duration"] == "6.000000"
 

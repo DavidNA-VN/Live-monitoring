@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid5
 
 import redis
 
@@ -18,14 +18,25 @@ from core.redis_scripts import PUBLISH_RUNTIME_HEALTH
 from models.runtime import (
     LiveCycleStats,
 )
-from models.alert import ALERT_SCHEMA_VERSION
+from models.alert import ALERT_SCHEMA_VERSION, deterministic_alert_id
+
+
+def runtime_health_event_id(storage_id: str) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"media-monitor:runtime-health:{storage_id}",
+        )
+    )
 
 
 class RedisRuntimeHealthReporter:
 
     def __init__(
         self,
-        stream_id: str,
+        *,
+        storage_id: str,
+        external_stream_id: str,
         redis_client: RedisClient,
         runtime_keys: RuntimeRedisKeys | None = None,
         alert_keys: AlertRedisKeys | None = None,
@@ -36,7 +47,8 @@ class RedisRuntimeHealthReporter:
             raise ValueError("health_ttl_seconds must be > 0")
         if stream_max_length <= 0:
             raise ValueError("stream_max_length must be > 0")
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.redis = redis_client.client
 
         self.runtime_keys = runtime_keys or RuntimeRedisKeys()
@@ -148,10 +160,10 @@ class RedisRuntimeHealthReporter:
         try:
             pipeline = self.redis.pipeline(transaction=True)
             pipeline.hset(
-                self.runtime_keys.metrics(self.stream_id),
+                self.runtime_keys.metrics(self.storage_id),
                 mapping=mapping,
             )
-            metrics_key = self.runtime_keys.metrics(self.stream_id)
+            metrics_key = self.runtime_keys.metrics(self.storage_id)
             counters = {
                 "audio_analysis_total": stats.audio_analysis_total,
                 "audio_analysis_failure_total": (
@@ -188,25 +200,39 @@ class RedisRuntimeHealthReporter:
         payload: str,
     ) -> None:
 
+        event_id = runtime_health_event_id(self.storage_id)
+        output_state = "RECOVERED" if state == "HEALTHY" else state
+        output_reason = (
+            "runtime_recovered"
+            if state == "HEALTHY"
+            else ",".join(reasons)
+        )
+        alert_id = deterministic_alert_id(
+            stream_id=self.storage_id,
+            event_id=event_id,
+            state=output_state,
+            reason=output_reason,
+            revision=payload,
+        )
         try:
             self.redis.eval(
                 PUBLISH_RUNTIME_HEALTH,
                 3,
                 self.runtime_keys.health(
-                    self.stream_id
+                    self.storage_id
                 ),
                 self.alert_keys.outbox(),
-                self.runtime_keys.metrics(self.stream_id),
+                self.runtime_keys.metrics(self.storage_id),
                 payload,
                 self.health_ttl_seconds,
                 state,
-                self.stream_id,
+                self.external_stream_id,
                 ",".join(
                     reasons
                 ),
                 ALERT_SCHEMA_VERSION,
-                str(uuid4()),
-                f"runtime-health:{self.stream_id}",
+                alert_id,
+                event_id,
                 datetime.now(timezone.utc).isoformat(),
                 self.stream_max_length,
             )

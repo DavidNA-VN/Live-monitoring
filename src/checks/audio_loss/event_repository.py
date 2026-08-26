@@ -10,7 +10,7 @@ class RedisAudioLossEventRepository:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
         redis_client,
         audio_keys: AudioLossRedisKeys,
         event_ttl_seconds: int,
@@ -21,7 +21,7 @@ class RedisAudioLossEventRepository:
             raise ValueError("event_ttl_seconds must be > 0")
         if commit_ttl_seconds <= 0:
             raise ValueError("commit_ttl_seconds must be > 0")
-        self.stream_id = stream_id
+        self.storage_id = storage_id
         self.redis = redis_client
         self.keys = audio_keys
         self.event_ttl_seconds = event_ttl_seconds
@@ -31,7 +31,7 @@ class RedisAudioLossEventRepository:
 
     def load_open(self, variant_stable_id: str) -> AudioLossLiveEvent | None:
         raw = self.redis.get(
-            self.keys.open_event(self.stream_id, variant_stable_id)
+            self.keys.open_event(self.storage_id, variant_stable_id)
         )
         return self.codec.decode(raw) if raw else None
 
@@ -44,13 +44,13 @@ class RedisAudioLossEventRepository:
     ) -> None:
         payload = self.codec.encode(event)
         pipeline.set(
-            self.keys.open_event(self.stream_id, event.variant_stable_id),
+            self.keys.open_event(self.storage_id, event.variant_stable_id),
             payload,
             ex=self.event_ttl_seconds,
         )
         pipeline.set(
             self.keys.event(
-                self.stream_id,
+                self.storage_id,
                 event.variant_stable_id,
                 event.event_id,
             ),
@@ -75,7 +75,7 @@ class RedisAudioLossEventRepository:
     ) -> None:
         pipeline.set(
             self.keys.event(
-                self.stream_id,
+                self.storage_id,
                 event.variant_stable_id,
                 event.event_id,
             ),
@@ -83,7 +83,7 @@ class RedisAudioLossEventRepository:
             ex=self.event_ttl_seconds,
         )
         pipeline.delete(
-            self.keys.open_event(self.stream_id, event.variant_stable_id)
+            self.keys.open_event(self.storage_id, event.variant_stable_id)
         )
         if alert_on_resolution:
             self.alerts.add_event(

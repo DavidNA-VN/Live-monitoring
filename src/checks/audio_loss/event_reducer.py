@@ -50,12 +50,14 @@ class AudioLossEventReducer:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
+        external_stream_id: str,
         boundary_tolerance: float = 0.10,
     ) -> None:
         if boundary_tolerance < 0:
             raise ValueError("boundary_tolerance must be >= 0")
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.boundary_tolerance = boundary_tolerance
 
     def reduce(
@@ -70,6 +72,8 @@ class AudioLossEventReducer:
 
         transitions: list[AudioLossEventTransition] = []
         current = self._copy_event(open_event)
+        if current is not None:
+            current.stream_id = self.external_stream_id
 
         if current is not None and not self._sequence_can_follow(
             event=current,
@@ -248,7 +252,7 @@ class AudioLossEventReducer:
     ) -> AudioLossLiveEvent:
         return AudioLossLiveEvent(
             event_id=self._event_id(segment=segment, start_offset=interval.start),
-            stream_id=self.stream_id,
+            stream_id=self.external_stream_id,
             variant_id=segment.variant_id,
             variant_stable_id=segment.variant_stable_id,
             discontinuity_sequence=segment.discontinuity_sequence,
@@ -314,7 +318,7 @@ class AudioLossEventReducer:
 
     def _event_id(self, *, segment: Segment, start_offset: float) -> str:
         raw = (
-            f"{self.stream_id}|"
+            f"{self.storage_id}|"
             f"{segment.variant_stable_id}|"
             f"{segment.timeline_generation}|"
             f"{segment.discontinuity_sequence}|"

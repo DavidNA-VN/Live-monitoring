@@ -13,6 +13,7 @@ class RedisAlertStream:
     def __init__(
         self,
         *,
+        storage_id: str,
         alert_keys: AlertRedisKeys,
         runtime_keys: RuntimeRedisKeys,
         max_length: int = 10_000,
@@ -20,6 +21,7 @@ class RedisAlertStream:
     ) -> None:
         if max_length <= 0:
             raise ValueError("max_length must be > 0")
+        self.storage_id = storage_id
         self.alert_keys = alert_keys
         self.runtime_keys = runtime_keys
         self.max_length = max_length
@@ -32,7 +34,7 @@ class RedisAlertStream:
             maxlen=self.max_length,
             approximate=False,
         )
-        metrics_key = self.runtime_keys.metrics(envelope.stream_id)
+        metrics_key = self.runtime_keys.metrics(self.storage_id)
         pipeline.hincrby(metrics_key, "alert_total", 1)
         pipeline.hincrby(
             metrics_key,

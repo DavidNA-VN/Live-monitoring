@@ -10,7 +10,8 @@ class AudioLossAlertPublisher:
     def __init__(
         self,
         *,
-        stream_id: str,
+        storage_id: str,
+        external_stream_id: str,
         alert_keys: AlertRedisKeys,
         runtime_keys: RuntimeRedisKeys,
         threshold_dbfs: float,
@@ -18,11 +19,13 @@ class AudioLossAlertPublisher:
         stream_max_length: int = 10_000,
         alert_sink: AlertSink | None = None,
     ) -> None:
-        self.stream_id = stream_id
+        self.storage_id = storage_id
+        self.external_stream_id = external_stream_id
         self.threshold_dbfs = threshold_dbfs
         self.threshold_duration = threshold_duration
         self.runtime_keys = runtime_keys
         self.stream = alert_sink or RedisAlertStream(
+            storage_id=storage_id,
             alert_keys=alert_keys,
             runtime_keys=runtime_keys,
             max_length=stream_max_length,
@@ -46,7 +49,6 @@ class AudioLossAlertPublisher:
             "start_sequence": str(event.start_sequence),
             "end_sequence": str(event.end_sequence),
             "affected_segment_count": str(event.affected_segment_count),
-            "variant_stable_id": event.variant_stable_id,
             "timeline_generation": str(event.timeline_generation),
             "start_media_revision": event.start_media_revision,
             "last_media_revision": event.last_media_revision,
@@ -73,7 +75,7 @@ class AudioLossAlertPublisher:
         ).lower()
         envelope = AlertEnvelope(
             alert_id=deterministic_alert_id(
-                stream_id=self.stream_id,
+                stream_id=self.storage_id,
                 event_id=event.event_id,
                 state=state,
                 reason=reason,
@@ -87,9 +89,10 @@ class AudioLossAlertPublisher:
             category=AlertCategory.CONTENT,
             event_type="AUDIO_LOSS",
             state=state,
-            stream_id=self.stream_id,
+            stream_id=self.external_stream_id,
             check="audio_loss",
             variant_id=event.variant_id,
+            variant_stable_id=event.variant_stable_id,
             occurred_at=(
                 event.end_program_time or event.start_program_time or now
             ),
@@ -107,6 +110,6 @@ class AudioLossAlertPublisher:
             if state == "OPEN"
             else "audio_loss_resolved_total"
         )
-        metrics_key = self.runtime_keys.metrics(self.stream_id)
+        metrics_key = self.runtime_keys.metrics(self.storage_id)
         pipeline.hincrby(metrics_key, metric, 1)
         pipeline.expire(metrics_key, 120)

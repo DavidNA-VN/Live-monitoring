@@ -44,7 +44,9 @@ def reduce(reducer, segment, signal, *intervals, open_event=None, checked=True):
 
 def test_audible_without_open_event_marks_segment_committed():
     transitions = reduce(
-        AudioLossEventReducer(stream_id="stream-1"),
+        AudioLossEventReducer(
+            storage_id="storage-1", external_stream_id="channel-01"
+        ),
         make_segment(10),
         AudioLossSignal.AUDIBLE,
     )
@@ -57,7 +59,9 @@ def test_audible_without_open_event_marks_segment_committed():
 def test_partial_silence_uses_offsets_and_resolves_in_same_segment():
     segment = make_segment(10, duration=6.0)
     transitions = reduce(
-        AudioLossEventReducer(stream_id="stream-1"),
+        AudioLossEventReducer(
+            storage_id="storage-1", external_stream_id="channel-01"
+        ),
         segment,
         AudioLossSignal.SILENT,
         SilenceInterval(1.25, 3.75),
@@ -67,6 +71,7 @@ def test_partial_silence_uses_offsets_and_resolves_in_same_segment():
     assert transition.type is AudioLossEventTransitionType.RESOLVE
     assert transition.reason == "audio_returned"
     assert transition.commits_segment is True
+    assert transition.event.stream_id == "channel-01"
     assert transition.event.duration == pytest.approx(2.5)
     assert transition.event.primary_cause is AudioLossCause.CONTINUOUS_SILENCE
     assert transition.event.status is AudioLossEventStatus.RESOLVED
@@ -75,12 +80,15 @@ def test_partial_silence_uses_offsets_and_resolves_in_same_segment():
 def test_missing_audio_counts_whole_segment_and_stays_open():
     segment = make_segment(10, duration=2.0)
     transition = reduce(
-        AudioLossEventReducer(stream_id="stream-1"),
+        AudioLossEventReducer(
+            storage_id="storage-1", external_stream_id="channel-01"
+        ),
         segment,
         AudioLossSignal.MISSING,
     )[0]
 
     assert transition.type is AudioLossEventTransitionType.PERSIST_OPEN
+    assert transition.event.stream_id == "channel-01"
     assert transition.event.duration == pytest.approx(2.0)
     assert transition.event.start_offset == 0.0
     assert transition.event.end_offset == 2.0
@@ -88,7 +96,9 @@ def test_missing_audio_counts_whole_segment_and_stays_open():
 
 
 def test_fifteen_two_second_segments_form_one_thirty_second_event():
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     current = None
     event_ids = set()
 
@@ -110,7 +120,9 @@ def test_fifteen_two_second_segments_form_one_thirty_second_event():
 
 
 def test_missing_to_silence_transition_keeps_one_event_and_both_causes():
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     first = make_segment(10, duration=20.0)
     opened = reduce(
         reducer,
@@ -128,6 +140,7 @@ def test_missing_to_silence_transition_keeps_one_event_and_both_causes():
     )[0]
 
     assert transition.event.event_id == event_id
+    assert transition.event.stream_id == "channel-01"
     assert transition.event.duration == pytest.approx(35.0)
     assert transition.event.primary_cause is AudioLossCause.AUDIO_STREAM_MISSING
     assert transition.event.causes_seen == [
@@ -137,7 +150,9 @@ def test_missing_to_silence_transition_keeps_one_event_and_both_causes():
 
 
 def test_audible_recovery_resolves_with_final_duration():
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     opened = reduce(
         reducer,
         make_segment(10, duration=6.0),
@@ -154,13 +169,16 @@ def test_audible_recovery_resolves_with_final_duration():
 
     assert transition.type is AudioLossEventTransitionType.RESOLVE
     assert transition.reason == "audio_returned"
+    assert transition.event.stream_id == "channel-01"
     assert transition.event.duration == pytest.approx(4.0)
     assert transition.event.resolution_reason == "audio_returned"
     assert transition.commits_segment is True
 
 
 def test_unknown_preserves_loaded_event_without_transition_or_mutation():
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     opened = reduce(
         reducer,
         make_segment(10, duration=2.0),
@@ -191,7 +209,9 @@ def test_unknown_preserves_loaded_event_without_transition_or_mutation():
     ],
 )
 def test_sequence_gap_or_discontinuity_does_not_join_event(changed_segment):
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     opened = reduce(
         reducer,
         make_segment(10, duration=2.0),
@@ -211,6 +231,7 @@ def test_sequence_gap_or_discontinuity_does_not_join_event(changed_segment):
     ]
     assert transitions[0].reason == "observation_gap"
     assert transitions[1].event.event_id != opened.event_id
+    assert transitions[1].event.stream_id == "channel-01"
 
 
 @pytest.mark.parametrize(
@@ -221,7 +242,9 @@ def test_sequence_gap_or_discontinuity_does_not_join_event(changed_segment):
     ],
 )
 def test_timeline_reset_or_replacement_does_not_join_event(field, old, new):
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     first = make_segment(10, duration=2.0)
     setattr(first, field, old)
     opened = reduce(reducer, first, AudioLossSignal.MISSING)[0].event
@@ -239,10 +262,13 @@ def test_timeline_reset_or_replacement_does_not_join_event(field, old, new):
     assert transitions[0].reason == "observation_gap"
     assert transitions[1].type is AudioLossEventTransitionType.PERSIST_OPEN
     assert transitions[1].event.event_id != opened.event_id
+    assert transitions[1].event.stream_id == "channel-01"
 
 
 def test_same_segment_overlap_only_adds_new_duration():
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     segment = make_segment(10, duration=6.0)
     opened = reduce(
         reducer,
@@ -260,18 +286,22 @@ def test_same_segment_overlap_only_adds_new_duration():
     )[0]
 
     assert transition.event.duration == pytest.approx(5.0)
+    assert transition.event.stream_id == "channel-01"
 
 
 def test_reducer_rejects_negative_boundary_tolerance():
     with pytest.raises(ValueError, match="boundary_tolerance"):
         AudioLossEventReducer(
-            stream_id="stream-1",
+            storage_id="storage-1",
+            external_stream_id="channel-01",
             boundary_tolerance=-0.01,
         )
 
 
 def test_unknown_sequence_never_claims_recovery_or_bridges_observation_gap():
-    reducer = AudioLossEventReducer(stream_id="stream-1")
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1", external_stream_id="channel-01"
+    )
     opened = reduce(
         reducer,
         make_segment(10, duration=2.0),
@@ -296,13 +326,16 @@ def test_unknown_sequence_never_claims_recovery_or_bridges_observation_gap():
     assert transitions[0].reason == "observation_gap"
     assert transitions[0].reason != "audio_returned"
     assert transitions[1].event.event_id != opened.event_id
+    assert transitions[1].event.stream_id == "channel-01"
 
 
 def test_multiple_silence_intervals_form_distinct_resolved_events():
     segment = make_segment(10, duration=6.0)
 
     transitions = reduce(
-        AudioLossEventReducer(stream_id="stream-1"),
+        AudioLossEventReducer(
+            storage_id="storage-1", external_stream_id="channel-01"
+        ),
         segment,
         AudioLossSignal.SILENT,
         SilenceInterval(1.0, 2.0),
@@ -317,3 +350,40 @@ def test_multiple_silence_intervals_form_distinct_resolved_events():
     assert transitions[0].event.event_id != transitions[1].event.event_id
     assert transitions[0].commits_segment is False
     assert transitions[1].commits_segment is True
+    assert transitions[0].event.stream_id == "channel-01"
+
+
+def test_audio_reducer_normalizes_legacy_open_event_stream_id():
+    reducer = AudioLossEventReducer(
+        storage_id="storage-1",
+        external_stream_id="channel-01",
+    )
+    from models.audio_loss import AudioLossLiveEvent
+    legacy_event = AudioLossLiveEvent(
+        event_id="legacy-audio-id",
+        stream_id="legacy-hash-id",
+        variant_id="720p",
+        variant_stable_id="v720",
+        discontinuity_sequence=0,
+        start_sequence=10,
+        end_sequence=10,
+        start_offset=0.0,
+        end_offset=2.0,
+        start_program_time=None,
+        end_program_time=None,
+        duration=2.0,
+        last_segment_duration=2.0,
+        primary_cause=AudioLossCause.AUDIO_STREAM_MISSING,
+        causes_seen=[AudioLossCause.AUDIO_STREAM_MISSING],
+        affected_segment_count=1,
+    )
+    segment = make_segment(11, duration=2.0)
+    transitions = reduce(
+        reducer,
+        segment,
+        AudioLossSignal.MISSING,
+        open_event=legacy_event,
+    )
+    assert len(transitions) == 1
+    assert transitions[0].event.stream_id == "channel-01"
+    assert transitions[0].event.event_id == "legacy-audio-id"

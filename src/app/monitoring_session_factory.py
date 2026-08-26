@@ -98,7 +98,8 @@ class MonitoringSessionFactory:
                 analysis_profiles=list(components.profiles),
                 runtime_keys=self.runtime_keys,
                 health_reporter=RedisRuntimeHealthReporter(
-                    stream_id=stream.storage_id,
+                    storage_id=stream.storage_id,
+                    external_stream_id=stream.external_stream_id,
                     redis_client=redis_client,
                     runtime_keys=self.runtime_keys,
                     alert_keys=self.alert_keys,
@@ -127,6 +128,7 @@ class MonitoringSessionFactory:
     ) -> DetectionComponents:
         profiles: list[AnalysisProfile] = []
         processors: list[SegmentProcessor] = []
+        identity = config.identity
         try:
             if config.black_screen_enabled:
                 black_profile = VideoRealtimeProfile(
@@ -136,7 +138,8 @@ class MonitoringSessionFactory:
                 processors.append(
                     BlackScreenSegmentProcessor(
                         event_store=RedisBlackEventStore(
-                            stream_id=config.identity.storage_id,
+                            storage_id=identity.storage_id,
+                            external_stream_id=identity.external_stream_id,
                             redis_client=redis_client,
                             black_keys=self.black_keys,
                             alert_keys=self.alert_keys,
@@ -159,7 +162,8 @@ class MonitoringSessionFactory:
                 processors.append(
                     AudioLossSegmentProcessor(
                         event_store=RedisAudioLossEventStore(
-                            stream_id=config.identity.storage_id,
+                            storage_id=identity.storage_id,
+                            external_stream_id=identity.external_stream_id,
                             redis_client=redis_client,
                             policy=AudioLossAlertPolicy(
                                 alert_duration=config.audio_loss_duration

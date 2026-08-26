@@ -58,7 +58,8 @@ def test_publisher_emits_canonical_variant_aware_contract():
     namespace = RedisNamespace("monitor:test")
     sink = CapturingSink()
     publisher = AudioLossAlertPublisher(
-        stream_id="stream-1",
+        storage_id="storage-1",
+        external_stream_id="channel-01",
         alert_keys=AlertRedisKeys(namespace),
         runtime_keys=RuntimeRedisKeys(namespace),
         threshold_dbfs=-60.0,
@@ -84,9 +85,11 @@ def test_publisher_emits_canonical_variant_aware_contract():
     opened, resolved = sink.envelopes
     assert opened.event_type == "AUDIO_LOSS"
     assert opened.check == "audio_loss"
+    assert opened.stream_id == "channel-01"
+    assert opened.variant_stable_id == "variant-stable-720"
+    assert "variant_stable_id" not in opened.attributes
     assert opened.state == "OPEN"
     assert opened.reason == "audio_stream_missing"
-    assert opened.attributes["variant_stable_id"] == "variant-stable-720"
     assert opened.attributes["threshold_dbfs"] == "-60"
     assert opened.attributes["threshold_duration"] == "30"
     assert opened.attributes["channel_mode"] == "all_channels"
@@ -101,13 +104,18 @@ def test_publisher_emits_canonical_variant_aware_contract():
         "audio_loss_open_total",
         "audio_loss_resolved_total",
     ]
+    assert [item[0] for item in pipeline.increments] == [
+        RuntimeRedisKeys(namespace).metrics("storage-1"),
+        RuntimeRedisKeys(namespace).metrics("storage-1"),
+    ]
 
 
 def test_publisher_alert_id_is_deterministic():
     namespace = RedisNamespace("monitor:test")
     sink = CapturingSink()
     publisher = AudioLossAlertPublisher(
-        stream_id="stream-1",
+        storage_id="storage-1",
+        external_stream_id="channel-01",
         alert_keys=AlertRedisKeys(namespace),
         runtime_keys=RuntimeRedisKeys(namespace),
         threshold_dbfs=-60.0,

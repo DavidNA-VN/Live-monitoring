@@ -65,7 +65,9 @@ def test_redis_processing_key_separates_generation_and_revision():
 
 
 def test_black_event_id_separates_generation_and_media_revision():
-    reducer = BlackEventReducer(stream_id="stream-1")
+    reducer = BlackEventReducer(
+        storage_id="stream-1", external_stream_id="channel-01"
+    )
 
     def event_id(generation, revision):
         segment = make_segment(100)

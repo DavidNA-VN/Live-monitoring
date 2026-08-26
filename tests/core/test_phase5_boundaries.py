@@ -62,7 +62,8 @@ def test_black_alert_mapping_has_no_redis_dependency():
     pipeline = RecordingPipeline()
     namespace = RedisNamespace("test")
     publisher = BlackAlertPublisher(
-        stream_id="stream-1",
+        storage_id="storage-1",
+        external_stream_id="channel-01",
         alert_keys=AlertRedisKeys(namespace),
         runtime_keys=RuntimeRedisKeys(namespace),
     )
@@ -78,6 +79,9 @@ def test_black_alert_mapping_has_no_redis_dependency():
     assert key == "test:alerts:outbox"
     assert fields["type"] == "BLACK_SCREEN"
     assert fields["state"] == "OPEN"
+    assert fields["stream_id"] == "channel-01"
+    assert fields["variant_stable_id"] == "v720"
+    assert "storage_id" not in fields
     assert fields["duration"] == "6.000000"
     assert fields["schema_version"] == "1.0"
     assert fields["category"] == "content"
@@ -87,7 +91,8 @@ def test_black_alert_publisher_accepts_replaceable_sink():
     sink = RecordingAlertSink()
     namespace = RedisNamespace("unused")
     publisher = BlackAlertPublisher(
-        stream_id="stream-1",
+        storage_id="storage-1",
+        external_stream_id="channel-01",
         alert_keys=AlertRedisKeys(namespace),
         runtime_keys=RuntimeRedisKeys(namespace),
         alert_sink=sink,
@@ -101,7 +106,8 @@ def test_black_alert_publisher_accepts_replaceable_sink():
     )
 
     assert sink.envelopes[0].event_type == "BLACK_SCREEN"
-    assert sink.envelopes[0].stream_id == "stream-1"
+    assert sink.envelopes[0].stream_id == "channel-01"
+    assert sink.envelopes[0].variant_stable_id == "v720"
 
 
 def test_live_poller_delegates_network_observation_to_injected_loader():
