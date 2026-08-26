@@ -12,6 +12,18 @@ from core.stream_session import (
 from models.stream_config import StreamConfig
 
 
+class StreamSupervisorAlreadyRegisteredError(ValueError):
+    pass
+
+
+class StreamSupervisorCapacityError(RuntimeError):
+    pass
+
+
+class StreamSupervisorConcurrentStartError(RuntimeError):
+    pass
+
+
 class StreamSessionFactory(Protocol):
     def create(self, config: StreamConfig) -> StreamSession:
         ...
@@ -48,9 +60,13 @@ class StreamSupervisor:
         stream_id = config.identity.external_stream_id
         with self._lock:
             if stream_id in self._slots:
-                raise ValueError(f"Stream already exists: {stream_id}")
+                raise StreamSupervisorAlreadyRegisteredError(
+                    f"Stream already exists: {stream_id}"
+                )
             if len(self._slots) >= self.max_streams:
-                raise RuntimeError("Stream supervisor capacity reached")
+                raise StreamSupervisorCapacityError(
+                    "Stream supervisor capacity reached"
+                )
             slot = _StreamSlot(
                 config=config,
                 idle_status=(
@@ -167,6 +183,24 @@ class StreamSupervisor:
                 errors[stream_id] = str(exc)
         return errors
 
+    def snapshot(self, stream_id: str) -> StreamSessionSnapshot | None:
+        with self._lock:
+            slot = self._slots.get(stream_id)
+            if slot is None:
+                return None
+            if slot.session is not None:
+                return slot.session.snapshot()
+            return StreamSessionSnapshot(
+                stream_id=stream_id,
+                status=slot.idle_status,
+                error=slot.error,
+            )
+
+    def configuration(self, stream_id: str) -> StreamConfig | None:
+        with self._lock:
+            slot = self._slots.get(stream_id)
+            return slot.config if slot is not None else None
+
     def snapshots(self) -> dict[str, StreamSessionSnapshot]:
         with self._lock:
             return {
@@ -235,7 +269,9 @@ class StreamSupervisor:
         # A concurrent pause/remove/update invalidated this startup attempt.
         session.stop(timeout=self.shutdown_timeout)
         if concurrent_start:
-            raise RuntimeError(f"Concurrent stream start: {stream_id}")
+            raise StreamSupervisorConcurrentStartError(
+                f"Concurrent stream start: {stream_id}"
+            )
 
     def _require_slot(self, stream_id: str) -> _StreamSlot:
         try:
