@@ -24,8 +24,13 @@
     "last_poll_at": {"type": ["string", "null"], "format": "date-time"},
     "active_variant_count": {"type": "integer", "minimum": 0},
     "queue_depth": {"type": "integer", "minimum": 0},
-    "queue_lag_seconds": {"type": "number", "minimum": 0},
+    "queue_lag_seconds": {"type": ["number", "null"], "minimum": 0},
     "error": {"type": ["string", "null"]},
+    "telemetry_available": {"type": "boolean"},
+    "health_reasons": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
     "checks": {
       "type": "object",
       "additionalProperties": {"enum": ["ENABLED", "DISABLED"]}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 import logging
 from threading import Lock, Thread
@@ -35,6 +36,7 @@ class StreamSessionSnapshot:
     stream_id: str
     status: StreamSessionStatus
     error: str | None = None
+    started_at: datetime | None = None
 
 
 class StreamSession:
@@ -53,6 +55,7 @@ class StreamSession:
         self.close_callbacks = close_callbacks
         self._status = StreamSessionStatus.CREATED
         self._error: str | None = None
+        self._started_at: datetime | None = None
         self._target_status = StreamSessionStatus.STOPPED
         self._thread: Thread | None = None
         self._lock = Lock()
@@ -65,6 +68,7 @@ class StreamSession:
                     f"Cannot start session in state {self._status.value}"
                 )
             self._status = StreamSessionStatus.RUNNING
+            self._started_at = datetime.now(timezone.utc)
             self._thread = Thread(
                 target=self._run,
                 name=f"stream-session-{self.stream_id[:48]}",
@@ -112,6 +116,7 @@ class StreamSession:
                 stream_id=self.stream_id,
                 status=self._status,
                 error=self._error,
+                started_at=self._started_at,
             )
 
     def _run(self) -> None:
