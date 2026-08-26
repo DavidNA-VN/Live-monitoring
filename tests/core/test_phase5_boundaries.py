@@ -119,7 +119,7 @@ def test_live_poller_delegates_network_observation_to_injected_loader():
         request_headers={"Authorization": "token"},
         loader=loader,
     )
-    stream = StreamIdentity("stream-1", "https://test/master.m3u8")
+    stream = StreamIdentity("stream-1", "storage-1", "https://test/master.m3u8")
 
     assert poller.poll(stream) is expected
     assert calls[0]["playlist_timeout"] == 3.0

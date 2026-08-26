@@ -44,7 +44,7 @@ class ProcessingRedisKeys:
         suffix: str,
     ) -> str:
         return (
-            f"{self.prefix}:stream:{identity.stream_id}:"
+            f"{self.prefix}:stream:{identity.storage_id}:"
             f"check:{identity.check_name}:"
             f"variant:{identity.variant_stable_id}:"
             f"timeline:{identity.timeline_generation}:"

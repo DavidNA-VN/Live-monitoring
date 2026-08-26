@@ -7,6 +7,10 @@ import pytest
 from core.profile_worker import ProfileWorkerCoordinator
 from core.profile_scheduler import ProfileScheduler
 from core.analysis_profile import AnalysisResourceClass
+from core.segment_admission import (
+    AdmittedProfileSegment,
+    ProfileSegmentIdentity,
+)
 from models.analysis import (
     AnalysisRequirement,
     AudioRealtimeAnalysis,
@@ -16,7 +20,7 @@ from models.analysis import (
     default_resource_limits,
 )
 from models.audio import AudioTrackPresence
-from models.stream import StreamIdentity
+from models.stream import StreamIdentity, build_stream_identity
 from tests.factories.hls import make_segment
 
 
@@ -42,7 +46,8 @@ class FakeProcessor:
 def build(*, processors, profiles):
     return ProfileScheduler(
         stream=StreamIdentity(
-            stream_id="stream-1",
+            external_stream_id="stream-1",
+            storage_id="storage-hash-1",
             master_url="https://example.test/master.m3u8",
         ),
         state_store=FakeStateStore(),
@@ -115,7 +120,11 @@ def test_explicit_resource_limits_do_not_multiply_one_decode_budget():
     limits[AnalysisResourceClass.AUDIO_DECODE] = ResourcePoolLimit(1, 2)
 
     scheduler = ProfileScheduler(
-        stream=StreamIdentity("stream-1", "https://test/master.m3u8"),
+        stream=StreamIdentity(
+            external_stream_id="stream-1",
+            storage_id="storage-hash-1",
+            master_url="https://test/master.m3u8",
+        ),
         state_store=FakeStateStore(),
         processors=[],
         analysis_profiles=[video, audio],
@@ -129,6 +138,45 @@ def test_explicit_resource_limits_do_not_multiply_one_decode_budget():
         assert scheduler.executors_by_resource[
             AnalysisResourceClass.AUDIO_DECODE
         ].max_workers == 1
+    finally:
+        scheduler.shutdown()
+
+
+def test_profile_scheduler_builds_processing_identity_with_storage_id():
+    video = FakeProfile()
+    processor = FakeProcessor()
+    identity = build_stream_identity(
+        "https://example/master.m3u8",
+        "channel-01",
+    )
+    scheduler = ProfileScheduler(
+        stream=identity,
+        state_store=FakeStateStore(),
+        processors=[processor],
+        analysis_profiles=[video],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+    )
+    try:
+        segment = make_segment(10)
+        item = AdmittedProfileSegment(
+            identity=ProfileSegmentIdentity(
+                profile_name="video_realtime",
+                variant_stable_id="v720",
+                timeline_generation=0,
+                discontinuity_sequence=0,
+                sequence=10,
+                media_revision="",
+            ),
+            segment=segment,
+            admitted_at=0.0,
+            last_seen_at=0.0,
+        )
+        proc_identity = scheduler._processing_identity(processor, item)
+        assert proc_identity.storage_id == identity.storage_id
+        assert proc_identity.storage_id != "channel-01"
+        assert proc_identity.check_name == "black_screen"
+        assert proc_identity.sequence == 10
     finally:
         scheduler.shutdown()
 

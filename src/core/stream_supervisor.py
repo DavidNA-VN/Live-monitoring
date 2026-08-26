@@ -45,7 +45,7 @@ class StreamSupervisor:
         self._lock = Lock()
 
     def add(self, config: StreamConfig, *, start: bool = True) -> str:
-        stream_id = config.identity.stream_id
+        stream_id = config.identity.external_stream_id
         with self._lock:
             if stream_id in self._slots:
                 raise ValueError(f"Stream already exists: {stream_id}")
@@ -107,7 +107,7 @@ class StreamSupervisor:
         self._start_slot(stream_id)
 
     def update(self, stream_id: str, config: StreamConfig) -> None:
-        if config.identity.stream_id != stream_id:
+        if config.identity.external_stream_id != stream_id:
             raise ValueError("Updated config must keep the same stream identity")
         with self._lock:
             slot = self._require_slot(stream_id)

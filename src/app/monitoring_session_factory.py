@@ -98,7 +98,7 @@ class MonitoringSessionFactory:
                 analysis_profiles=list(components.profiles),
                 runtime_keys=self.runtime_keys,
                 health_reporter=RedisRuntimeHealthReporter(
-                    stream_id=stream.stream_id,
+                    stream_id=stream.storage_id,
                     redis_client=redis_client,
                     runtime_keys=self.runtime_keys,
                     alert_keys=self.alert_keys,
@@ -136,7 +136,7 @@ class MonitoringSessionFactory:
                 processors.append(
                     BlackScreenSegmentProcessor(
                         event_store=RedisBlackEventStore(
-                            stream_id=config.identity.stream_id,
+                            stream_id=config.identity.storage_id,
                             redis_client=redis_client,
                             black_keys=self.black_keys,
                             alert_keys=self.alert_keys,
@@ -159,7 +159,7 @@ class MonitoringSessionFactory:
                 processors.append(
                     AudioLossSegmentProcessor(
                         event_store=RedisAudioLossEventStore(
-                            stream_id=config.identity.stream_id,
+                            stream_id=config.identity.storage_id,
                             redis_client=redis_client,
                             policy=AudioLossAlertPolicy(
                                 alert_duration=config.audio_loss_duration

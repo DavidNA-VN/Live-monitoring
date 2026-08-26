@@ -39,7 +39,7 @@ def test_two_observers_advance_one_shared_generation_for_same_reset():
 def test_redis_processing_key_separates_generation_and_revision():
     keys = ProcessingRedisKeys()
     base = dict(
-        stream_id="stream-1",
+        storage_id="stream-1",
         check_name="black_screen",
         variant_stable_id="v720",
         discontinuity_sequence=0,

@@ -33,11 +33,14 @@ def test_alert_contract_matches_current_detection_cases():
         "BLACK_SCREEN",
         "REPEATED_BLACK_SCREEN",
         "AUDIO_LOSS",
+        "RUNTIME_HEALTH",
     ]
     assert properties["state"]["enum"] == [
         "OPEN",
         "UPDATE",
         "RESOLVED",
+        "DEGRADED",
+        "RECOVERED",
     ]
     assert {
         "alert_id",

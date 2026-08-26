@@ -304,7 +304,7 @@ class ProfileScheduler:
         item: AdmittedProfileSegment,
     ) -> SegmentProcessingIdentity:
         return SegmentProcessingIdentity(
-            stream_id=self.stream.stream_id,
+            storage_id=self.stream.storage_id,
             check_name=processor.name,
             variant_stable_id=item.identity.variant_stable_id,
             discontinuity_sequence=(

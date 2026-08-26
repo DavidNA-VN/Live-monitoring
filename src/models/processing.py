@@ -25,7 +25,7 @@ class SegmentClaimStatus(
 
 @dataclass(frozen=True)
 class SegmentProcessingIdentity:
-    stream_id: str
+    storage_id: str
     check_name: str
     variant_stable_id: str
     timeline_generation: int

@@ -62,7 +62,7 @@ def test_session_reports_stopping_until_inflight_drain_completes():
 class StubSession:
     def __init__(self, item, *, stop_result=True):
         self.config = item
-        self.stream_id = item.identity.stream_id
+        self.stream_id = item.identity.external_stream_id
         self.started = False
         self.stop_result = stop_result
         self.stop_calls = 0
@@ -114,6 +114,8 @@ def test_supervisor_add_pause_resume_update_remove_lifecycle():
     )
     first = config("one")
     stream_id = supervisor.add(first)
+    assert stream_id == "one"
+    assert set(supervisor.snapshots()) == {"one"}
     assert supervisor.snapshots()[stream_id].status == (
         StreamSessionStatus.RUNNING
     )
@@ -153,7 +155,7 @@ def test_supervisor_exposes_session_assembly_failure():
     with pytest.raises(RuntimeError, match="assembly failed"):
         supervisor.add(item)
 
-    snapshot = supervisor.snapshots()[item.identity.stream_id]
+    snapshot = supervisor.snapshots()[item.identity.external_stream_id]
     assert snapshot.status == StreamSessionStatus.FAILED
     assert snapshot.error == "assembly failed"
     assert supervisor.is_healthy() is False

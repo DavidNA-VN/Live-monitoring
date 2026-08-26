@@ -48,7 +48,7 @@ class StreamSession:
         close_callbacks: tuple[Callable[[], None], ...] = (),
     ) -> None:
         self.config = config
-        self.stream_id = config.identity.stream_id
+        self.stream_id = config.identity.external_stream_id
         self.runtime = runtime
         self.close_callbacks = close_callbacks
         self._status = StreamSessionStatus.CREATED
@@ -67,7 +67,7 @@ class StreamSession:
             self._status = StreamSessionStatus.RUNNING
             self._thread = Thread(
                 target=self._run,
-                name=f"stream-session-{self.stream_id[:12]}",
+                name=f"stream-session-{self.stream_id[:48]}",
                 daemon=False,
             )
             self._thread.start()

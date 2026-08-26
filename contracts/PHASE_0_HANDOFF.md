@@ -42,6 +42,7 @@ dinh, can co trong alert khi backend can correlation/deduplication theo variant.
 - `BLACK_SCREEN`: `OPEN`, `RESOLVED`.
 - `REPEATED_BLACK_SCREEN`: `OPEN`, `UPDATE`, `RESOLVED`.
 - `AUDIO_LOSS`: `OPEN`, `RESOLVED`.
+- `RUNTIME_HEALTH`: `DEGRADED`, `RECOVERED`.
 - Audio loss phan biet `continuous_silence` va `audio_stream_missing` qua
   `attributes.primary_cause`.
 - Short black 0-3 giay khong publish tung warning; no tham gia rolling rule tao

@@ -35,7 +35,7 @@ def test_core_key_schemas_are_stable():
     runtime = RuntimeRedisKeys(namespace)
     alerts = AlertRedisKeys(namespace)
     identity = SegmentProcessingIdentity(
-        stream_id="stream-1",
+        storage_id="stream-1",
         check_name="black_screen",
         variant_stable_id="v720",
         timeline_generation=2,
@@ -112,3 +112,38 @@ def test_audio_loss_keys_are_variant_and_timeline_scoped():
         "monitor:test:stream:stream-1:audio-loss:variant:v720:timeline:2:"
         "disc:3:segment:100:revision:revision-1:event-committed"
     )
+
+
+def test_redis_keys_use_storage_id_not_external_stream_id():
+    from hashlib import sha256
+    from models.stream import build_stream_identity
+
+    stream_identity = build_stream_identity(
+        "https://example/master.m3u8",
+        "channel-01",
+    )
+    assert stream_identity.external_stream_id == "channel-01"
+    expected_storage_id = sha256("channel-01".encode("utf-8")).hexdigest()[:24]
+    assert stream_identity.storage_id == expected_storage_id
+
+    namespace = RedisNamespace("monitor:test")
+    processing = ProcessingRedisKeys(namespace)
+    runtime = RuntimeRedisKeys(namespace)
+
+    seg_identity = SegmentProcessingIdentity(
+        storage_id=stream_identity.storage_id,
+        check_name="black_screen",
+        variant_stable_id="v720",
+        timeline_generation=1,
+        discontinuity_sequence=0,
+        sequence=10,
+        media_revision="rev1",
+    )
+
+    seg_key = processing.segment_state(seg_identity)
+    assert f"stream:{expected_storage_id}" in seg_key
+    assert "stream:channel-01" not in seg_key
+
+    health_key = runtime.health(stream_identity.storage_id)
+    assert f"stream:{expected_storage_id}" in health_key
+    assert "stream:channel-01" not in health_key

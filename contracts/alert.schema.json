@@ -23,9 +23,16 @@
     "event_id": {"type": "string", "minLength": 1},
     "category": {"enum": ["content", "runtime"]},
     "event_type": {
-      "enum": ["BLACK_SCREEN", "REPEATED_BLACK_SCREEN", "AUDIO_LOSS"]
+      "enum": [
+        "BLACK_SCREEN",
+        "REPEATED_BLACK_SCREEN",
+        "AUDIO_LOSS",
+        "RUNTIME_HEALTH"
+      ]
     },
-    "state": {"enum": ["OPEN", "UPDATE", "RESOLVED"]},
+    "state": {
+      "enum": ["OPEN", "UPDATE", "RESOLVED", "DEGRADED", "RECOVERED"]
+    },
     "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "check": {"type": ["string", "null"]},
     "variant_id": {"type": ["string", "null"]},

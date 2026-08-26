@@ -121,11 +121,11 @@ class LiveMonitoringRuntime:
         )
         self.observations = PlaylistObservationTracker(
             delta_engine,
-            stream_id=stream.stream_id,
+            stream_id=stream.storage_id,
             generation_store=generation_store,
         )
         self.variant_registry = RedisActiveVariantRegistry(
-            stream_id=stream.stream_id,
+            stream_id=stream.storage_id,
             redis_client=state_store.redis,
             runtime_keys=(
                 runtime_keys
@@ -166,7 +166,8 @@ class LiveMonitoringRuntime:
                         exc,
                         extra={
                             "event_name": "master_playlist_unavailable",
-                            "stream_id": self.stream.stream_id,
+                            "stream_id": self.stream.external_stream_id,
+                            "storage_id": self.stream.storage_id,
                         },
                     )
                     if self.health_reporter is not None:
@@ -206,7 +207,8 @@ class LiveMonitoringRuntime:
                 error,
                 extra={
                     "event_name": "media_playlist_unavailable",
-                    "stream_id": self.stream.stream_id,
+                    "stream_id": self.stream.external_stream_id,
+                    "storage_id": self.stream.storage_id,
                     "variant_id": variant_id,
                 },
             )

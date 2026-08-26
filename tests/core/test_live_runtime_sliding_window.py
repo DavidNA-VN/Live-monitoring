@@ -289,7 +289,8 @@ def make_runtime(
     )
     runtime = LiveMonitoringRuntime(
         stream=StreamIdentity(
-            stream_id="stream-1",
+            external_stream_id="stream-1",
+            storage_id="storage-1",
             master_url="https://example.test/master.m3u8",
         ),
         state_store=state_store,
