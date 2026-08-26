@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/runtime-status.schema.json",
+  "title": "RuntimeStatusDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "stream_id",
+    "status",
+    "health",
+    "active_variant_count",
+    "queue_depth",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "status": {
+      "enum": ["CREATED", "STARTING", "RUNNING", "PAUSED", "STOPPING", "STOPPED", "FAILED"]
+    },
+    "health": {"enum": ["UNKNOWN", "HEALTHY", "DEGRADED", "UNHEALTHY"]},
+    "started_at": {"type": ["string", "null"], "format": "date-time"},
+    "last_poll_at": {"type": ["string", "null"], "format": "date-time"},
+    "active_variant_count": {"type": "integer", "minimum": 0},
+    "queue_depth": {"type": "integer", "minimum": 0},
+    "queue_lag_seconds": {"type": "number", "minimum": 0},
+    "error": {"type": ["string", "null"]},
+    "checks": {
+      "type": "object",
+      "additionalProperties": {"enum": ["ENABLED", "DISABLED"]}
+    }
+  }
+}

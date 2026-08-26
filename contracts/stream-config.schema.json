@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/stream-config.schema.json",
+  "title": "StreamConfigDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stream_id", "master_url", "checks"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "master_url": {"type": "string", "format": "uri", "minLength": 1},
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["black_screen", "audio_loss"],
+      "properties": {
+        "black_screen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        },
+        "audio_loss": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "threshold_dbfs", "duration_seconds"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "threshold_dbfs": {"type": "number", "maximum": 0},
+            "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "track_index": {"type": "integer", "minimum": 0, "default": 0}
+          }
+        }
+      }
+    }
+  }
+}

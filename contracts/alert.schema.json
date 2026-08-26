@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/alert.schema.json",
+  "title": "AlertDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "alert_id",
+    "event_id",
+    "category",
+    "event_type",
+    "state",
+    "stream_id",
+    "occurred_at",
+    "emitted_at",
+    "reason",
+    "attributes"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "alert_id": {"type": "string", "minLength": 1},
+    "event_id": {"type": "string", "minLength": 1},
+    "category": {"enum": ["content", "runtime"]},
+    "event_type": {
+      "enum": ["BLACK_SCREEN", "REPEATED_BLACK_SCREEN", "AUDIO_LOSS"]
+    },
+    "state": {"enum": ["OPEN", "UPDATE", "RESOLVED"]},
+    "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "check": {"type": ["string", "null"]},
+    "variant_id": {"type": ["string", "null"]},
+    "variant_stable_id": {"type": ["string", "null"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "emitted_at": {"type": "string", "format": "date-time"},
+    "event_started_at": {"type": ["string", "null"], "format": "date-time"},
+    "event_ended_at": {"type": ["string", "null"], "format": "date-time"},
+    "reason": {"type": "string", "minLength": 1},
+    "attributes": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    }
+  }
+}
