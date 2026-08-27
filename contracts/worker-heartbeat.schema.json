@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/worker-heartbeat.schema.json",
+  "title": "WorkerHeartbeatDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "worker_id",
+    "state",
+    "started_at",
+    "last_seen_at",
+    "command_consumer_ready",
+    "active_stream_count",
+    "max_streams",
+    "active_media_processes",
+    "max_media_processes",
+    "version"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "worker_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "state": {
+      "enum": ["STARTING", "READY", "DEGRADED", "STOPPING"]
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "last_seen_at": {"type": "string", "format": "date-time"},
+    "command_consumer_ready": {"type": "boolean"},
+    "active_stream_count": {"type": "integer", "minimum": 0},
+    "max_streams": {"type": "integer", "minimum": 1},
+    "active_media_processes": {"type": "integer", "minimum": 0},
+    "max_media_processes": {"type": "integer", "minimum": 1},
+    "version": {"type": "string", "minLength": 1}
+  }
+}

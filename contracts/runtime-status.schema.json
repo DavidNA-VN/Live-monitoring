@@ -34,6 +34,13 @@
     "checks": {
       "type": "object",
       "additionalProperties": {"enum": ["ENABLED", "DISABLED"]}
-    }
+    },
+    "worker_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "observed_at": {"type": "string", "format": "date-time"}
   }
 }

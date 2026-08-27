@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/runtime-status-update.schema.json",
+  "title": "RuntimeStatusUpdateDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "update_id",
+    "update_type",
+    "stream_id",
+    "worker_id",
+    "observed_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "update_id": {"type": "string", "minLength": 1},
+    "update_type": {
+      "enum": ["SNAPSHOT", "REMOVED"]
+    },
+    "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "worker_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "observed_at": {"type": "string", "format": "date-time"},
+    "status": {
+      "allOf": [
+        {"$ref": "runtime-status.schema.json"},
+        {
+          "type": "object",
+          "required": ["worker_id", "observed_at"]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "update_type": {"const": "SNAPSHOT"}
+        }
+      },
+      "then": {"required": ["status"]},
+      "else": {
+        "not": {"required": ["status"]}
+      }
+    }
+  ]
+}
