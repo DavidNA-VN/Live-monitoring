@@ -150,3 +150,63 @@ def test_reused_command_id_with_different_payload_goes_to_dead_letter():
 
     assert control.starts == 1
     assert redis.streams[keys.dead_letter()][0]["error_code"] == "DUPLICATE_COMMAND_ID"
+
+
+def test_consumer_readiness_lifecycle():
+    from threading import Event, Thread
+    import time
+    import redis
+
+    class ReadyRedis(FakeRedis):
+        def __init__(self):
+            super().__init__()
+            self.should_fail = False
+
+        def xgroup_create(self, *args, **kwargs):
+            return True
+
+        def xautoclaim(self, *args, **kwargs):
+            if self.should_fail:
+                raise redis.RedisError("Connection lost")
+            return ["0-0", []]
+
+        def xreadgroup(self, *args, **kwargs):
+            if self.should_fail:
+                raise redis.RedisError("Connection lost")
+            return []
+
+    r = ReadyRedis()
+    keys = ControlRedisKeys()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=r,
+        handler=MonitoringCommandHandler(Control()),
+        keys=keys,
+        block_milliseconds=10,
+        poll_retry_backoff=0.01,
+    )
+
+    assert consumer.is_ready is False
+
+    stop_event = Event()
+    thread = Thread(target=consumer.run, args=(stop_event,), daemon=True)
+    thread.start()
+
+    time.sleep(0.05)
+    # Consumer should now be ready after ensure_group succeeds
+    assert consumer.is_ready is True
+
+    # Simulate redis error
+    r.should_fail = True
+    time.sleep(0.05)
+    # Should clear readiness on error
+    assert consumer.is_ready is False
+
+    # Recover
+    r.should_fail = False
+    time.sleep(0.05)
+    assert consumer.is_ready is True
+
+    # Stop
+    stop_event.set()
+    thread.join(timeout=1.0)
+    assert consumer.is_ready is False

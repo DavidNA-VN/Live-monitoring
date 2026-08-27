@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from threading import BoundedSemaphore
+from dataclasses import dataclass
+from threading import BoundedSemaphore, Condition
+from time import monotonic
 from typing import Protocol
 
 
@@ -10,6 +12,61 @@ class ProcessGate(Protocol):
 
     def release(self) -> None:
         ...
+
+
+@dataclass(frozen=True)
+class MediaProcessCapacitySnapshot:
+    active: int
+    maximum: int
+
+
+class ObservableProcessGate:
+    """Service-wide process budget with an atomically observable active count."""
+
+    def __init__(self, max_concurrent: int) -> None:
+        if max_concurrent <= 0:
+            raise ValueError("max_concurrent must be > 0")
+        self.maximum = max_concurrent
+        self._active = 0
+        self._condition = Condition()
+
+    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
+        if not blocking and timeout is not None:
+            raise ValueError("timeout is not supported for non-blocking acquire")
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be >= 0")
+
+        with self._condition:
+            if not blocking:
+                if self._active >= self.maximum:
+                    return False
+            elif timeout is None:
+                while self._active >= self.maximum:
+                    self._condition.wait()
+            else:
+                deadline = monotonic() + timeout
+                while self._active >= self.maximum:
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        return False
+                    self._condition.wait(remaining)
+
+            self._active += 1
+            return True
+
+    def release(self) -> None:
+        with self._condition:
+            if self._active <= 0:
+                raise ValueError("Process gate released too many times")
+            self._active -= 1
+            self._condition.notify()
+
+    def snapshot(self) -> MediaProcessCapacitySnapshot:
+        with self._condition:
+            return MediaProcessCapacitySnapshot(
+                active=self._active,
+                maximum=self.maximum,
+            )
 
 
 class CompositeProcessGate:
@@ -24,7 +81,10 @@ class CompositeProcessGate:
         acquired: list[ProcessGate] = []
         try:
             for gate in self.gates:
-                gate.acquire()
+                if not gate.acquire():
+                    for acquired_gate in reversed(acquired):
+                        acquired_gate.release()
+                    return False
                 acquired.append(gate)
         except BaseException:
             for gate in reversed(acquired):

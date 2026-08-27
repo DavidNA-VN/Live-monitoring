@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from threading import BoundedSemaphore
 
 from checks.audio_loss.live_state import RedisAudioLossEventStore
 from checks.audio_loss.processor import AudioLossSegmentProcessor
@@ -13,6 +12,7 @@ from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from core.alert_stream import AlertSink
 from core.analysis_profile import AnalysisProfile
 from core.live_runtime import LiveMonitoringRuntime, LiveRuntimeSettings
+from core.media_process_budget import ObservableProcessGate, ProcessGate
 from core.redis_client import RedisClient, RedisSettings
 from core.redis_keys import (
     AlertRedisKeys,
@@ -57,6 +57,7 @@ class MonitoringSessionFactory:
         namespace: RedisNamespace | None = None,
         alert_sink_factory: AlertSinkFactory | None = None,
         max_concurrent_media_processes: int = 8,
+        service_media_process_gate: ObservableProcessGate | ProcessGate | None = None,
     ) -> None:
         if max_concurrent_media_processes <= 0:
             raise ValueError("max_concurrent_media_processes must be > 0")
@@ -68,8 +69,9 @@ class MonitoringSessionFactory:
         self.black_keys = BlackScreenRedisKeys(self.namespace)
         self.audio_keys = AudioLossRedisKeys(self.namespace)
         self.alert_sink_factory = alert_sink_factory
-        self.service_media_process_gate = BoundedSemaphore(
-            max_concurrent_media_processes
+        self.service_media_process_gate = (
+            service_media_process_gate
+            or ObservableProcessGate(max_concurrent_media_processes)
         )
 
     def create(self, config: StreamConfig) -> StreamSession:

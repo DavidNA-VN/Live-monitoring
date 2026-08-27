@@ -45,6 +45,7 @@ class RedisMonitoringCommandConsumer:
         dead_letter_max_length: int = 1_000,
         processed_ttl_seconds: int = 86_400,
         on_command_finalized: Callable[[], None] | None = None,
+        poll_retry_backoff: float = 1.0,
     ) -> None:
         positive = {
             "block_milliseconds": block_milliseconds,
@@ -57,6 +58,8 @@ class RedisMonitoringCommandConsumer:
         for name, value in positive.items():
             if value <= 0:
                 raise ValueError(f"{name} must be > 0")
+        if poll_retry_backoff <= 0:
+            raise ValueError("poll_retry_backoff must be > 0")
         if not group_name or not consumer_name:
             raise ValueError("group_name and consumer_name must not be empty")
         self.redis = getattr(redis_client, "client", redis_client)
@@ -71,6 +74,12 @@ class RedisMonitoringCommandConsumer:
         self.dead_letter_max_length = dead_letter_max_length
         self.processed_ttl_seconds = processed_ttl_seconds
         self.on_command_finalized = on_command_finalized
+        self.poll_retry_backoff = poll_retry_backoff
+        self._ready_event = Event()
+
+    @property
+    def is_ready(self) -> bool:
+        return self._ready_event.is_set()
 
     def ensure_group(self) -> None:
         try:
@@ -86,15 +95,21 @@ class RedisMonitoringCommandConsumer:
 
     def run(self, stop_event: Event) -> None:
         group_ready = False
-        while not stop_event.is_set():
-            try:
-                if not group_ready:
-                    self.ensure_group()
-                    group_ready = True
-                self.poll_once()
-            except redis.RedisError:
-                logger.exception("Monitoring command Redis poll failed")
-                stop_event.wait(1.0)
+        try:
+            while not stop_event.is_set():
+                try:
+                    if not group_ready:
+                        self.ensure_group()
+                        group_ready = True
+                        self._ready_event.set()
+                    self.poll_once()
+                except redis.RedisError:
+                    self._ready_event.clear()
+                    group_ready = False
+                    logger.exception("Monitoring command Redis poll failed")
+                    stop_event.wait(self.poll_retry_backoff)
+        finally:
+            self._ready_event.clear()
 
     def poll_once(self) -> int:
         entries = self._claim_pending()

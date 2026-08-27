@@ -216,6 +216,11 @@ class StreamSupervisor:
                 for stream_id, slot in self._slots.items()
             }
 
+    def stream_count(self) -> int:
+        """Return the number of currently registered stream slots in the supervisor."""
+        with self._lock:
+            return len(self._slots)
+
     def is_healthy(self) -> bool:
         with self._lock:
             slots = tuple(self._slots.values())

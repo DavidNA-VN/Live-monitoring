@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import signal
 from threading import Event, Thread
 
@@ -78,10 +79,33 @@ def parse_args(argv=None):
         help="Explicit unique worker identity (e.g. worker-local-01)",
     )
     parser.add_argument(
+        "--worker-version",
+        default=os.getenv("WORKER_VERSION", "dev"),
+        help="Worker release version (default: WORKER_VERSION env or 'dev')",
+    )
+    parser.add_argument(
         "--projection-interval",
         type=float,
         default=2.0,
         help="Runtime status projection cycle interval in seconds",
+    )
+    parser.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=5.0,
+        help="Worker heartbeat refresh interval in seconds",
+    )
+    parser.add_argument(
+        "--heartbeat-ttl",
+        type=int,
+        default=15,
+        help="Worker heartbeat Redis key TTL in seconds",
+    )
+    parser.add_argument(
+        "--worker-discovery-window",
+        type=int,
+        default=30,
+        help="Active worker discovery window retention in seconds",
     )
     args = parser.parse_args(argv)
     if not args.url and not args.command_worker:
@@ -90,6 +114,14 @@ def parse_args(argv=None):
         parser.error("--max-streams must be > 0")
     if args.projection_interval <= 0:
         parser.error("--projection-interval must be > 0")
+    if args.heartbeat_interval <= 0:
+        parser.error("--heartbeat-interval must be > 0")
+    if args.heartbeat_ttl <= args.heartbeat_interval:
+        parser.error("--heartbeat-ttl must be > --heartbeat-interval")
+    if args.worker_discovery_window < args.heartbeat_ttl:
+        parser.error("--worker-discovery-window must be >= --heartbeat-ttl")
+    if not args.worker_version or not args.worker_version.strip():
+        parser.error("--worker-version must not be empty")
     return args
 
 
@@ -108,13 +140,19 @@ def main():
         max_concurrent_media_processes=args.max_service_media_processes,
         consumer_name=args.consumer_name,
         worker_id=args.worker_id,
+        worker_version=args.worker_version,
+        command_consumer_required=args.command_worker,
         projection_interval=args.projection_interval,
+        heartbeat_interval=args.heartbeat_interval,
+        heartbeat_ttl=args.heartbeat_ttl,
+        worker_discovery_window=args.worker_discovery_window,
     )
     console_client = None
     console_thread = None
     console_stop = Event()
     command_thread = None
     projection_thread = None
+    heartbeat_thread = None
 
     def shutdown_handler(_signum, _frame):
         shutdown_event.set()
@@ -144,7 +182,7 @@ def main():
             ))
             stream_id = result.stream_id
 
-        # Start public runtime status projection thread
+        # 1. Start public runtime status projection thread
         projection_thread = Thread(
             target=application.run_projection,
             args=(shutdown_event,),
@@ -153,6 +191,7 @@ def main():
         )
         projection_thread.start()
 
+        # 2. Start command consumer thread if in command-worker mode
         if args.command_worker:
             command_thread = Thread(
                 target=application.run_commands,
@@ -161,6 +200,16 @@ def main():
                 daemon=False,
             )
             command_thread.start()
+
+        # 3. Start worker heartbeat thread
+        heartbeat_thread = Thread(
+            target=application.run_heartbeat,
+            args=(shutdown_event,),
+            name="worker-heartbeat",
+            daemon=False,
+        )
+        heartbeat_thread.start()
+
         if args.console:
             console_client = RedisClient()
             console_client.ping()
@@ -184,6 +233,8 @@ def main():
     finally:
         shutdown_event.set()
         application.projection_service.wake()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join()
         if command_thread is not None:
             command_thread.join()
         if projection_thread is not None:

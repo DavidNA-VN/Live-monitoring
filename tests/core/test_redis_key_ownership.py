@@ -1,3 +1,5 @@
+import pytest
+
 from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from checks.audio_loss.redis_keys import AudioLossRedisKeys
 from core.redis_keys import (
@@ -7,6 +9,7 @@ from core.redis_keys import (
     PublicRuntimeRedisKeys,
     RedisNamespace,
     RuntimeRedisKeys,
+    WorkerRedisKeys,
 )
 from models.processing import SegmentProcessingIdentity
 
@@ -16,6 +19,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     processing = ProcessingRedisKeys(namespace)
     runtime = RuntimeRedisKeys(namespace)
     public_runtime = PublicRuntimeRedisKeys(namespace)
+    worker = WorkerRedisKeys(namespace)
     alerts = AlertRedisKeys(namespace)
     control = ControlRedisKeys(namespace)
     black = BlackScreenRedisKeys(namespace)
@@ -24,6 +28,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     assert processing.namespace is namespace
     assert runtime.namespace is namespace
     assert public_runtime.namespace is namespace
+    assert worker.namespace is namespace
     assert alerts.namespace is namespace
     assert control.namespace is namespace
     assert black.namespace is namespace
@@ -31,6 +36,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     assert not hasattr(processing, "open_event")
     assert not hasattr(runtime, "segment_state")
     assert not hasattr(public_runtime, "health")
+    assert not hasattr(worker, "health")
     assert not hasattr(alerts, "health")
     assert not hasattr(control, "segment_state")
     assert not hasattr(black, "outbox")
@@ -83,6 +89,16 @@ def test_core_key_schemas_are_stable():
     assert public_runtime.status_updates() == (
         "monitor:test:public:runtime-status-updates"
     )
+
+    worker_keys = WorkerRedisKeys(namespace)
+    assert worker_keys.heartbeat("worker-1") == (
+        "monitor:test:workers:worker-1:heartbeat"
+    )
+    assert worker_keys.active_workers() == (
+        "monitor:test:workers:active"
+    )
+    with pytest.raises(ValueError, match="Invalid worker_id"):
+        worker_keys.heartbeat("../unsafe-worker")
 
 
 def test_black_screen_key_schemas_stay_inside_check_package():
