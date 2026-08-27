@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from app.monitoring_command_handler import MonitoringCommandHandler
 from app.redis_monitoring_command_consumer import RedisMonitoringCommandConsumer
@@ -210,3 +211,78 @@ def test_consumer_readiness_lifecycle():
     stop_event.set()
     thread.join(timeout=1.0)
     assert consumer.is_ready is False
+
+
+def test_persistence_failure_leaves_command_pending():
+    from core.desired_state_repository import DesiredStatePersistenceError
+
+    class FailingPersistenceHandler:
+        def handle(self, command):
+            raise DesiredStatePersistenceError("Cannot save desired state")
+
+    redis = FakeRedis()
+    keys = ControlRedisKeys()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=redis,
+        handler=FailingPersistenceHandler(),
+        keys=keys,
+    )
+
+    with pytest.raises(RuntimeError):
+        consumer._process("1-0", {"payload": command_payload()})
+
+    # Must NOT acknowledge
+    assert redis.acked == []
+    # Must NOT set processed marker
+    assert not any("processed" in k for k in redis.values)
+    # Must NOT post to results stream
+    assert keys.command_results() not in redis.streams
+    # Must NOT post to dead letter
+    assert keys.dead_letter() not in redis.streams
+
+
+def test_deferred_command_blocks_later_entries_until_persistence_recovers():
+    from datetime import datetime, timezone
+    from core.desired_state_repository import DesiredStatePersistenceError
+    from models.monitoring_command import (
+        MonitoringCommandResult,
+        MonitoringCommandResultStatus,
+    )
+
+    class FailOnceHandler:
+        def __init__(self):
+            self.calls = []
+            self.failed = False
+
+        def handle(self, command):
+            self.calls.append(command.command_id)
+            if not self.failed:
+                self.failed = True
+                raise DesiredStatePersistenceError("temporary failure")
+            return MonitoringCommandResult(
+                command_id=command.command_id,
+                action=command.action,
+                stream_id=command.stream_id,
+                status=MonitoringCommandResultStatus.APPLIED,
+                changed=True,
+                processed_at=datetime.now(timezone.utc),
+            )
+
+    redis = FakeRedis()
+    handler = FailOnceHandler()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=redis,
+        handler=handler,
+    )
+    consumer._deferred_entries = [
+        ("1-0", {"payload": command_payload("cmd-1")}),
+        ("2-0", {"payload": command_payload("cmd-2")}),
+    ]
+
+    assert consumer.poll_once() == 0
+    assert handler.calls == ["cmd-1"]
+    assert len(consumer._deferred_entries) == 2
+
+    assert consumer.poll_once() == 2
+    assert handler.calls == ["cmd-1", "cmd-1", "cmd-2"]
+    assert consumer._deferred_entries == []

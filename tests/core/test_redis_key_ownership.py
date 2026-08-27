@@ -1,10 +1,11 @@
 import pytest
 
-from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from checks.audio_loss.redis_keys import AudioLossRedisKeys
+from checks.black_screen.redis_keys import BlackScreenRedisKeys
 from core.redis_keys import (
     AlertRedisKeys,
     ControlRedisKeys,
+    DesiredStateRedisKeys,
     ProcessingRedisKeys,
     PublicRuntimeRedisKeys,
     RedisNamespace,
@@ -20,6 +21,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     runtime = RuntimeRedisKeys(namespace)
     public_runtime = PublicRuntimeRedisKeys(namespace)
     worker = WorkerRedisKeys(namespace)
+    desired = DesiredStateRedisKeys(namespace)
     alerts = AlertRedisKeys(namespace)
     control = ControlRedisKeys(namespace)
     black = BlackScreenRedisKeys(namespace)
@@ -29,6 +31,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     assert runtime.namespace is namespace
     assert public_runtime.namespace is namespace
     assert worker.namespace is namespace
+    assert desired.namespace is namespace
     assert alerts.namespace is namespace
     assert control.namespace is namespace
     assert black.namespace is namespace
@@ -37,6 +40,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     assert not hasattr(runtime, "segment_state")
     assert not hasattr(public_runtime, "health")
     assert not hasattr(worker, "health")
+    assert not hasattr(desired, "health")
     assert not hasattr(alerts, "health")
     assert not hasattr(control, "segment_state")
     assert not hasattr(black, "outbox")
@@ -99,6 +103,14 @@ def test_core_key_schemas_are_stable():
     )
     with pytest.raises(ValueError, match="Invalid worker_id"):
         worker_keys.heartbeat("../unsafe-worker")
+
+    desired_keys = DesiredStateRedisKeys(namespace)
+    assert desired_keys.current_states() == (
+        "monitor:test:monitoring:desired-streams"
+    )
+    assert desired_keys.recovery_errors() == (
+        "monitor:test:monitoring:desired-state-recovery-errors"
+    )
 
 
 def test_black_screen_key_schemas_stay_inside_check_package():

@@ -11,6 +11,25 @@ class StreamConfigMappingError(ValueError):
     pass
 
 
+def stream_config_to_public(config: StreamConfig) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "stream_id": config.identity.external_stream_id,
+        "master_url": config.master_url,
+        "checks": {
+            "black_screen": {
+                "enabled": config.black_screen_enabled,
+            },
+            "audio_loss": {
+                "enabled": config.audio_loss_enabled,
+                "threshold_dbfs": float(config.silence_threshold_dbfs),
+                "duration_seconds": float(config.audio_loss_duration),
+                "track_index": int(config.audio_track_index),
+            },
+        },
+    }
+
+
 def stream_config_from_public(data: object) -> StreamConfig:
     if not isinstance(data, dict):
         raise StreamConfigMappingError("config must be an object")

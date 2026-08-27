@@ -1,12 +1,20 @@
 from app.monitoring_worker import MonitoringWorkerApplication
+from app.persistent_monitoring_command_handler import (
+    PersistentMonitoringCommandHandler,
+)
+from app.redis_desired_state_repository import RedisDesiredStateRepository
 from app.redis_runtime_status_projector import RedisRuntimeStatusProjector
 from app.redis_worker_heartbeat_publisher import RedisWorkerHeartbeatPublisher
 from app.runtime_status_projection_service import RuntimeStatusProjectionService
+from app.supervisor_desired_state_reconciler import (
+    SupervisorDesiredStateReconciler,
+)
 from app.supervisor_monitoring_control import SupervisorMonitoringControl
 from app.supervisor_runtime_status import SupervisorRuntimeStatusReader
 from app.worker_heartbeat_service import WorkerHeartbeatService
 from core.media_process_budget import ObservableProcessGate
 from core.redis_keys import (
+    DesiredStateRedisKeys,
     PublicRuntimeRedisKeys,
     RedisNamespace,
     WorkerRedisKeys,
@@ -24,11 +32,15 @@ def test_worker_composition_shares_one_supervisor_between_ports():
         assert isinstance(application.runtime_status, SupervisorRuntimeStatusReader)
         assert isinstance(application.public_runtime_keys, PublicRuntimeRedisKeys)
         assert isinstance(application.worker_keys, WorkerRedisKeys)
+        assert isinstance(application.desired_keys, DesiredStateRedisKeys)
+        assert isinstance(application.desired_repository, RedisDesiredStateRepository)
         assert isinstance(application.projector, RedisRuntimeStatusProjector)
         assert isinstance(application.projection_service, RuntimeStatusProjectionService)
         assert isinstance(application.media_gate, ObservableProcessGate)
         assert isinstance(application.heartbeat_publisher, RedisWorkerHeartbeatPublisher)
         assert isinstance(application.heartbeat_service, WorkerHeartbeatService)
+        assert isinstance(application.persistent_handler, PersistentMonitoringCommandHandler)
+        assert isinstance(application.reconciler, SupervisorDesiredStateReconciler)
         assert application.worker_id == "worker-test-comp"
         assert application.control.supervisor is application.supervisor
         assert application.runtime_status.supervisor is application.supervisor
@@ -39,7 +51,12 @@ def test_worker_composition_shares_one_supervisor_between_ports():
         assert application.heartbeat_service.media_gate is application.media_gate
         assert application.heartbeat_service.publisher is application.heartbeat_publisher
         assert application.command_handler.control is application.control
-        assert application.command_consumer.handler is application.command_handler
+        assert application.persistent_handler.inner_handler is application.command_handler
+        assert application.persistent_handler.repository is application.desired_repository
+        assert application.command_consumer.handler is application.persistent_handler
+        assert application.reconciler.supervisor is application.supervisor
+        assert application.reconciler.control is application.control
+        assert application.reconciler.repository is application.desired_repository
     finally:
         application.close()
 

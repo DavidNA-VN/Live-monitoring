@@ -1,21 +1,32 @@
 from __future__ import annotations
 
 from threading import Event
+import logging
 from uuid import uuid4
 
 from app.monitoring_command_handler import MonitoringCommandHandler
 from app.monitoring_session_factory import MonitoringSessionFactory
+from app.persistent_monitoring_command_handler import (
+    PersistentMonitoringCommandHandler,
+)
+from app.redis_desired_state_repository import RedisDesiredStateRepository
 from app.redis_monitoring_command_consumer import RedisMonitoringCommandConsumer
 from app.redis_runtime_status_projector import RedisRuntimeStatusProjector
 from app.redis_worker_heartbeat_publisher import RedisWorkerHeartbeatPublisher
 from app.runtime_status_projection_service import RuntimeStatusProjectionService
+from app.supervisor_desired_state_reconciler import (
+    SupervisorDesiredStateReconciler,
+)
 from app.supervisor_monitoring_control import SupervisorMonitoringControl
 from app.supervisor_runtime_status import SupervisorRuntimeStatusReader
 from app.worker_heartbeat_service import WorkerHeartbeatService
+from core.desired_state_reconciler import RecoveryReport
+from core.desired_state_repository import DesiredStateUnavailableError
 from core.media_process_budget import ObservableProcessGate
 from core.redis_client import RedisClient, RedisSettings
 from core.redis_keys import (
     ControlRedisKeys,
+    DesiredStateRedisKeys,
     PublicRuntimeRedisKeys,
     RedisNamespace,
     RuntimeRedisKeys,
@@ -25,8 +36,11 @@ from core.stream_supervisor import StreamSupervisor
 from models.runtime_status import WORKER_ID_REGEX
 
 
+logger = logging.getLogger(__name__)
+
+
 class MonitoringWorkerApplication:
-    """Composition root for lifecycle, status, projection, heartbeat, and Redis command delivery."""
+    """Composition root for lifecycle, status, projection, heartbeat, desired recovery, and Redis command delivery."""
 
     def __init__(
         self,
@@ -81,10 +95,25 @@ class MonitoringWorkerApplication:
             projector=self.projector,
             projection_interval=projection_interval,
         )
+        self.desired_keys = DesiredStateRedisKeys(self.namespace)
+        self.desired_repository = RedisDesiredStateRepository(
+            redis_client=self.redis_client,
+            keys=self.desired_keys,
+        )
+        self.reconciler = SupervisorDesiredStateReconciler(
+            supervisor=self.supervisor,
+            control=self.control,
+            repository=self.desired_repository,
+        )
         self.command_handler = MonitoringCommandHandler(self.control)
+        self.persistent_handler = PersistentMonitoringCommandHandler(
+            inner_handler=self.command_handler,
+            repository=self.desired_repository,
+            supervisor=self.supervisor,
+        )
         self.command_consumer = RedisMonitoringCommandConsumer(
             redis_client=self.redis_client,
-            handler=self.command_handler,
+            handler=self.persistent_handler,
             keys=ControlRedisKeys(self.namespace),
             consumer_name=consumer_name or f"{self.worker_id}-commands",
             on_command_finalized=self.projection_service.wake,
@@ -111,7 +140,22 @@ class MonitoringWorkerApplication:
     def ping(self) -> None:
         self.redis_client.ping()
 
+    def reconcile(self) -> RecoveryReport:
+        return self.reconciler.reconcile()
+
     def run_commands(self, stop_event: Event) -> None:
+        while not stop_event.is_set():
+            try:
+                self.reconciler.reconcile()
+                break
+            except DesiredStateUnavailableError:
+                logger.exception(
+                    "Desired state recovery is unavailable; retrying before "
+                    "command consumer startup"
+                )
+                stop_event.wait(self.command_consumer.poll_retry_backoff)
+        if stop_event.is_set():
+            return
         self.command_consumer.run(stop_event)
 
     def run_projection(self, stop_event: Event) -> None:

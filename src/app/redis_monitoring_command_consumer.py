@@ -5,12 +5,12 @@ from hashlib import sha256
 import json
 import logging
 from threading import Event
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import redis
 
-from app.monitoring_command_handler import MonitoringCommandHandler
 from app.stream_config_mapper import StreamConfigMappingError
+from core.desired_state_repository import DesiredStatePersistenceError
 from core.monitoring_control import (
     MonitoringControlError,
     StreamAlreadyExistsError,
@@ -25,8 +25,19 @@ from models.monitoring_command import (
     MonitoringCommandResultStatus,
 )
 
-
 logger = logging.getLogger(__name__)
+
+
+class _CommandDeferred(RuntimeError):
+    def __init__(self, entry_id: str, fields: dict[str, object]) -> None:
+        super().__init__(entry_id)
+        self.entry_id = entry_id
+        self.fields = fields
+
+
+class MonitoringCommandExecutor(Protocol):
+    def handle(self, command: MonitoringCommand) -> MonitoringCommandResult:
+        ...
 
 
 class RedisMonitoringCommandConsumer:
@@ -34,7 +45,7 @@ class RedisMonitoringCommandConsumer:
         self,
         *,
         redis_client: Any,
-        handler: MonitoringCommandHandler,
+        handler: MonitoringCommandExecutor,
         keys: ControlRedisKeys | None = None,
         group_name: str = "monitoring-workers",
         consumer_name: str = "worker-1",
@@ -76,6 +87,7 @@ class RedisMonitoringCommandConsumer:
         self.on_command_finalized = on_command_finalized
         self.poll_retry_backoff = poll_retry_backoff
         self._ready_event = Event()
+        self._deferred_entries: list[tuple[str, dict[str, object]]] = []
 
     @property
     def is_ready(self) -> bool:
@@ -103,6 +115,8 @@ class RedisMonitoringCommandConsumer:
                         group_ready = True
                         self._ready_event.set()
                     self.poll_once()
+                    if self._deferred_entries:
+                        stop_event.wait(self.poll_retry_backoff)
                 except redis.RedisError:
                     self._ready_event.clear()
                     group_ready = False
@@ -112,8 +126,13 @@ class RedisMonitoringCommandConsumer:
             self._ready_event.clear()
 
     def poll_once(self) -> int:
-        entries = self._claim_pending()
-        if not entries:
+        entries = (
+            list(self._deferred_entries)
+            if self._deferred_entries
+            else self._claim_pending()
+        )
+        processing_deferred = bool(self._deferred_entries)
+        if not entries and not processing_deferred:
             response = self.redis.xreadgroup(
                 self.group_name,
                 self.consumer_name,
@@ -122,9 +141,21 @@ class RedisMonitoringCommandConsumer:
                 block=self.block_milliseconds,
             )
             entries = response[0][1] if response else []
-        for entry_id, fields in entries:
-            self._process(entry_id, fields)
-        return len(entries)
+        processed = 0
+        for index, (entry_id, fields) in enumerate(entries):
+            try:
+                self._process(entry_id, fields)
+            except _CommandDeferred as deferred:
+                self._deferred_entries = [
+                    (deferred.entry_id, deferred.fields),
+                    *entries[index + 1 :],
+                ]
+                break
+            else:
+                if processing_deferred:
+                    self._deferred_entries.pop(0)
+                processed += 1
+        return processed
 
     def _claim_pending(self) -> list[tuple[str, dict[str, str]]]:
         response = self.redis.xautoclaim(
@@ -174,6 +205,13 @@ class RedisMonitoringCommandConsumer:
         try:
             result = self.handler.handle(command)
             self._finalize(entry_id, processed_key, fingerprint, result)
+        except DesiredStatePersistenceError:
+            logger.error(
+                "Desired state persistence failed for command %s; leaving command pending in Redis",
+                command.command_id,
+                exc_info=True,
+            )
+            raise _CommandDeferred(entry_id, fields)
         except (StreamConfigMappingError, ValueError) as exc:
             result = self._failure_result(
                 command,

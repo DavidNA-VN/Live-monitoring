@@ -141,3 +141,18 @@ class WorkerRedisKeys:
 
     def active_workers(self) -> str:
         return f"{self.prefix}:workers:active"
+
+
+class DesiredStateRedisKeys:
+    def __init__(self, namespace: RedisNamespace | None = None) -> None:
+        self.namespace = namespace or RedisNamespace()
+
+    @property
+    def prefix(self) -> str:
+        return self.namespace.prefix
+
+    def current_states(self) -> str:
+        return f"{self.prefix}:monitoring:desired-streams"
+
+    def recovery_errors(self) -> str:
+        return f"{self.prefix}:monitoring:desired-state-recovery-errors"
