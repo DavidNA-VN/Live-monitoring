@@ -4,6 +4,7 @@ from threading import Event
 import logging
 from uuid import uuid4
 
+from app.command_guardrails import CommandGuardrails
 from app.monitoring_command_handler import MonitoringCommandHandler
 from app.monitoring_session_factory import MonitoringSessionFactory
 from app.persistent_monitoring_command_handler import (
@@ -12,6 +13,9 @@ from app.persistent_monitoring_command_handler import (
 from app.redis_desired_state_repository import RedisDesiredStateRepository
 from app.redis_monitoring_command_consumer import RedisMonitoringCommandConsumer
 from app.redis_runtime_status_projector import RedisRuntimeStatusProjector
+from app.redis_worker_command_metrics_publisher import (
+    RedisWorkerCommandMetricsPublisher,
+)
 from app.redis_worker_heartbeat_publisher import RedisWorkerHeartbeatPublisher
 from app.runtime_status_projection_service import RuntimeStatusProjectionService
 from app.supervisor_desired_state_reconciler import (
@@ -20,6 +24,7 @@ from app.supervisor_desired_state_reconciler import (
 from app.supervisor_monitoring_control import SupervisorMonitoringControl
 from app.supervisor_runtime_status import SupervisorRuntimeStatusReader
 from app.worker_heartbeat_service import WorkerHeartbeatService
+from core.command_metrics import CommandMetricsCollector
 from core.desired_state_reconciler import RecoveryReport
 from core.desired_state_repository import DesiredStateUnavailableError
 from core.media_process_budget import ObservableProcessGate
@@ -59,6 +64,9 @@ class MonitoringWorkerApplication:
         heartbeat_interval: float = 5.0,
         heartbeat_ttl: int = 15,
         worker_discovery_window: int = 30,
+        max_command_payload_bytes: int = 65_536,
+        max_command_age_seconds: float | None = None,
+        command_metrics_ttl: int = 120,
     ) -> None:
         self.namespace = namespace or RedisNamespace()
         self.worker_id = worker_id or f"worker-{uuid4().hex[:12]}"
@@ -113,14 +121,28 @@ class MonitoringWorkerApplication:
             repository=self.desired_repository,
             supervisor=self.supervisor,
         )
+        self.worker_keys = WorkerRedisKeys(self.namespace)
+        self.guardrails = CommandGuardrails(
+            max_payload_bytes=max_command_payload_bytes,
+            max_command_age_seconds=max_command_age_seconds,
+        )
+        self.command_metrics = CommandMetricsCollector()
+        self.command_metrics_publisher = RedisWorkerCommandMetricsPublisher(
+            redis_client=self.redis_client,
+            keys=self.worker_keys,
+            ttl_seconds=command_metrics_ttl,
+        )
         self.command_consumer = RedisMonitoringCommandConsumer(
             redis_client=self.redis_client,
             handler=self.persistent_handler,
             keys=ControlRedisKeys(self.namespace),
             consumer_name=consumer_name or f"{self.worker_id}-commands",
+            worker_id=self.worker_id,
+            guardrails=self.guardrails,
+            metrics=self.command_metrics,
+            metrics_publisher=self.command_metrics_publisher,
             on_command_finalized=self.projection_service.wake,
         )
-        self.worker_keys = WorkerRedisKeys(self.namespace)
         self.heartbeat_publisher = RedisWorkerHeartbeatPublisher(
             redis_client=self.redis_client,
             keys=self.worker_keys,

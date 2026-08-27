@@ -18,6 +18,7 @@ def test_all_mvp_contracts_use_schema_version_1():
         "runtime-status.schema.json",
         "runtime-status-update.schema.json",
         "worker-heartbeat.schema.json",
+        "worker-command-metrics.schema.json",
         "alert.schema.json",
     )
 

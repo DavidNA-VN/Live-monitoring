@@ -131,6 +131,19 @@ def test_full_lifecycle_fast_e2e(redis_context, probe):
         assert desired_stopped["desired_state"] == "STOPPED"
         assert desired_stopped["config"] is None
 
+        # Step 7: Verify worker command metrics published to Redis
+        metrics = probe.wait_command_metrics(
+            worker_id,
+            predicate=lambda m: int(m.get("command_applied_total", 0)) >= 5,
+            timeout=5.0,
+        )
+        assert metrics["worker_id"] == worker_id
+        assert metrics["schema_version"] == "1.0"
+        assert metrics["command_applied_total"] == "5"
+        assert metrics["command_duplicate_replay_total"] == "1"
+        assert metrics["command_dead_letter_total"] == "0"
+        assert float(metrics["command_processing_duration_ms_total"]) > 0
+
     finally:
         runner.request_shutdown()
         runner_thread.join(timeout=5.0)

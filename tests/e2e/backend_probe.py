@@ -73,18 +73,25 @@ class BackendProbe:
         stream_id: str,
         config: dict[str, Any] | None = None,
         command_id: str | None = None,
-        requested_at: datetime | None = None,
+        requested_at: datetime | str | None = None,
     ) -> str:
         cid = command_id or f"cmd-{uuid4().hex[:12]}"
         if config is None and action in ("START", "UPDATE_CONFIG"):
             config = sample_stream_config_dict(stream_id)
+
+        if isinstance(requested_at, datetime):
+            req_str = requested_at.isoformat()
+        elif isinstance(requested_at, str):
+            req_str = requested_at
+        else:
+            req_str = datetime.now(timezone.utc).isoformat()
 
         payload = json.dumps({
             "schema_version": "1.0",
             "command_id": cid,
             "command_type": action,
             "stream_id": stream_id,
-            "requested_at": (requested_at or datetime.now(timezone.utc)).isoformat(),
+            "requested_at": req_str,
             "config": config,
         })
         self.client.xadd(self.control_keys.commands(), {"payload": payload})
@@ -266,3 +273,24 @@ class BackendProbe:
             return None
 
         return self.wait_until(_check, timeout=timeout, description="matching alert in outbox")
+
+    def wait_command_metrics(
+        self,
+        worker_id: str,
+        predicate: Callable[[dict[str, Any]], bool] | None = None,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        def _check() -> dict[str, Any] | None:
+            raw = self.client.hgetall(self.worker_keys.command_metrics(worker_id))
+            if not raw:
+                return None
+            parsed = {}
+            for k, v in raw.items():
+                k_str = k.decode("utf-8") if isinstance(k, bytes) else str(k)
+                v_str = v.decode("utf-8") if isinstance(v, bytes) else str(v)
+                parsed[k_str] = v_str
+            if predicate is not None and not predicate(parsed):
+                return None
+            return parsed
+
+        return self.wait_until(_check, timeout=timeout, description=f"command metrics for worker_id={worker_id}")

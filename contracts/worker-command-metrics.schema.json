@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/worker-command-metrics.schema.json",
+  "title": "WorkerCommandMetricsDTO",
+  "description": "Public snapshot of monitoring worker command execution and health metrics",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "worker_id",
+    "observed_at",
+    "command_delivery_received_total",
+    "command_applied_total",
+    "command_noop_total",
+    "command_rejected_total",
+    "command_failed_total",
+    "command_reclaimed_total",
+    "command_duplicate_replay_total",
+    "command_dead_letter_total",
+    "command_oversized_total",
+    "command_stale_total",
+    "command_poll_failure_total",
+    "command_processing_duration_ms_total",
+    "command_pending_count",
+    "command_deferred_count",
+    "command_processing_duration_ms_max",
+    "last_command_processing_duration_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "worker_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "command_delivery_received_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_applied_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_noop_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_rejected_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_failed_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_reclaimed_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_duplicate_replay_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_dead_letter_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_oversized_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_stale_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_poll_failure_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_processing_duration_ms_total": {
+      "type": "number",
+      "minimum": 0
+    },
+    "command_pending_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_deferred_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "command_processing_duration_ms_max": {
+      "type": "number",
+      "minimum": 0
+    },
+    "last_command_processing_duration_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "last_successful_poll_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "last_command_processed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "last_error_code": {
+      "type": ["string", "null"]
+    }
+  }
+}

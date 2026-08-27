@@ -139,6 +139,11 @@ class WorkerRedisKeys:
             raise ValueError(f"Invalid worker_id '{worker_id}'")
         return f"{self.prefix}:workers:{worker_id}:heartbeat"
 
+    def command_metrics(self, worker_id: str) -> str:
+        if not isinstance(worker_id, str) or not WORKER_ID_REGEX.fullmatch(worker_id):
+            raise ValueError(f"Invalid worker_id '{worker_id}'")
+        return f"{self.prefix}:worker:{worker_id}:command-metrics"
+
     def active_workers(self) -> str:
         return f"{self.prefix}:workers:active"
 

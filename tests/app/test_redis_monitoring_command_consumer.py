@@ -5,11 +5,13 @@ import time
 import pytest
 import redis
 
+from app.command_guardrails import CommandGuardrails
 from app.monitoring_command_handler import MonitoringCommandHandler
 from app.redis_monitoring_command_consumer import (
     RedisMonitoringCommandConsumer,
     _CommandDeferred,
 )
+from core.command_metrics import CommandMetricsCollector
 from core.desired_state_repository import DesiredStatePersistenceError
 from core.monitoring_control import MonitoringAction, MonitoringControlResult
 from core.redis_keys import ControlRedisKeys
@@ -127,7 +129,7 @@ class FakeRedis:
         return p
 
 
-def command_payload(command_id="cmd-1"):
+def command_payload(command_id="cmd-1", requested_at=None):
     config = {
         "schema_version": "1.0",
         "stream_id": "channel-01",
@@ -147,7 +149,7 @@ def command_payload(command_id="cmd-1"):
         "command_id": command_id,
         "command_type": "START",
         "stream_id": "channel-01",
-        "requested_at": "2026-08-26T10:00:00+00:00",
+        "requested_at": requested_at or "2026-08-26T10:00:00+00:00",
         "config": config,
     })
 
@@ -332,8 +334,8 @@ def test_deferred_command_blocks_later_entries_until_persistence_recovers():
         handler=handler,
     )
     consumer._deferred_entries = [
-        ("1-0", {"payload": command_payload("cmd-1")}),
-        ("2-0", {"payload": command_payload("cmd-2")}),
+        ("1-0", {"payload": command_payload("cmd-1")}, False),
+        ("2-0", {"payload": command_payload("cmd-2")}, False),
     ]
 
     assert consumer.poll_once() == 0
@@ -343,3 +345,151 @@ def test_deferred_command_blocks_later_entries_until_persistence_recovers():
     assert consumer.poll_once() == 2
     assert handler.calls == ["cmd-1", "cmd-1", "cmd-2"]
     assert consumer._deferred_entries == []
+
+
+def test_reclaimed_command_keeps_age_exemption_when_deferred():
+    class FailOnceHandler:
+        def __init__(self):
+            self.calls = 0
+
+        def handle(self, command):
+            self.calls += 1
+            if self.calls == 1:
+                raise DesiredStatePersistenceError("temporary failure")
+            return MonitoringCommandResult(
+                command_id=command.command_id,
+                action=command.action,
+                stream_id=command.stream_id,
+                status=MonitoringCommandResultStatus.APPLIED,
+                changed=True,
+                processed_at=datetime.now(timezone.utc),
+            )
+
+    now = datetime(2026, 8, 27, 10, 0, 0, tzinfo=timezone.utc)
+    redis_client = FakeRedis()
+    redis_client.claimed_pending = [
+        (
+            "1-0",
+            {
+                "payload": command_payload(
+                    "cmd-reclaimed",
+                    requested_at="2020-01-01T00:00:00Z",
+                )
+            },
+        )
+    ]
+    handler = FailOnceHandler()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=redis_client,
+        handler=handler,
+        guardrails=CommandGuardrails(max_command_age_seconds=60.0),
+        utc_now=lambda: now,
+    )
+
+    assert consumer.poll_once() == 0
+    assert consumer._deferred_entries[0][2] is True
+    assert consumer.poll_once() == 1
+    assert handler.calls == 2
+    assert consumer._deferred_entries == []
+
+
+def test_oversized_payload_safe_dead_letter_and_metrics():
+    ctrl = Control()
+    handler = MonitoringCommandHandler(ctrl)
+    collector = CommandMetricsCollector()
+    guardrails = CommandGuardrails(max_payload_bytes=50)
+
+    r = FakeRedis()
+    keys = ControlRedisKeys()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=r,
+        handler=handler,
+        keys=keys,
+        guardrails=guardrails,
+        metrics=collector,
+    )
+
+    oversized_text = "x" * 100
+    consumer._process("1-0", {"payload": oversized_text})
+
+    # Assert ACKed
+    assert r.acked == [(keys.commands(), "monitoring-workers", "1-0")]
+    # Assert DLQ entry created
+    dlq = r.streams.get(keys.dead_letter(), [])
+    assert len(dlq) == 1
+    dlq_entry = dlq[0]
+    assert dlq_entry["source_entry_id"] == "1-0"
+    assert dlq_entry["payload_size_bytes"] == "100"
+    assert dlq_entry["error_code"] == "COMMAND_PAYLOAD_TOO_LARGE"
+    # Raw payload must NOT be saved in DLQ
+    assert "payload" not in dlq_entry
+
+    # Assert metrics updated
+    snap = collector.snapshot("worker-1")
+    assert snap.command_oversized_total == 1
+    assert snap.command_dead_letter_total == 1
+    assert snap.last_error_code == "COMMAND_PAYLOAD_TOO_LARGE"
+
+
+def test_stale_command_rejection_and_metrics():
+    ctrl = Control()
+    handler = MonitoringCommandHandler(ctrl)
+    collector = CommandMetricsCollector()
+    guardrails = CommandGuardrails(max_command_age_seconds=60.0)
+
+    r = FakeRedis()
+    keys = ControlRedisKeys()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=r,
+        handler=handler,
+        keys=keys,
+        guardrails=guardrails,
+        metrics=collector,
+    )
+
+    old_requested = "2020-01-01T00:00:00Z"
+    stale_payload = command_payload("cmd-stale", requested_at=old_requested)
+
+    consumer._process("1-0", {"payload": stale_payload})
+
+    # Assert ACKed
+    assert r.acked == [(keys.commands(), "monitoring-workers", "1-0")]
+    # Assert result stream has REJECTED status with STALE_COMMAND error_code
+    results = r.streams.get(keys.command_results(), [])
+    assert len(results) == 1
+    res_data = json.loads(results[0]["payload"])
+    assert res_data["status"] == "REJECTED"
+    assert res_data["error_code"] == "STALE_COMMAND"
+
+    # Assert metrics updated
+    snap = collector.snapshot("worker-1")
+    assert snap.command_stale_total == 1
+    assert snap.command_rejected_total == 1
+
+
+def test_duplicate_replay_increments_replay_metric():
+    ctrl = Control()
+    handler = MonitoringCommandHandler(ctrl)
+    collector = CommandMetricsCollector()
+
+    r = FakeRedis()
+    keys = ControlRedisKeys()
+    consumer = RedisMonitoringCommandConsumer(
+        redis_client=r,
+        handler=handler,
+        keys=keys,
+        metrics=collector,
+    )
+
+    payload = command_payload("cmd-replay")
+    # First execution -> APPLIED
+    consumer._process("1-0", {"payload": payload})
+    snap1 = collector.snapshot("worker-1")
+    assert snap1.command_applied_total == 1
+    assert snap1.command_duplicate_replay_total == 0
+
+    # Second execution with same payload -> Replay ACK
+    consumer._process("2-0", {"payload": payload})
+    snap2 = collector.snapshot("worker-1")
+    assert snap2.command_applied_total == 1
+    assert snap2.command_duplicate_replay_total == 1
