@@ -1,13 +1,12 @@
 import argparse
 import logging
 import os
-import signal
 from threading import Event, Thread
 
 from app.monitoring_worker import MonitoringWorkerApplication
+from app.monitoring_worker_runner import MonitoringWorkerRunner
 from core.redis_client import RedisClient
 from core.redis_keys import RedisNamespace
-from core.stream_session import StreamSessionStatus
 from models.stream_config import StreamConfig
 from reporting.live_console import LiveAlertConsole
 
@@ -107,6 +106,12 @@ def parse_args(argv=None):
         default=30,
         help="Active worker discovery window retention in seconds",
     )
+    parser.add_argument(
+        "--shutdown-timeout",
+        type=float,
+        default=30.0,
+        help="Overall graceful shutdown deadline in seconds",
+    )
     args = parser.parse_args(argv)
     if not args.url and not args.command_worker:
         parser.error("one of --url or --command-worker is required")
@@ -122,6 +127,8 @@ def parse_args(argv=None):
         parser.error("--worker-discovery-window must be >= --heartbeat-ttl")
     if not args.worker_version or not args.worker_version.strip():
         parser.error("--worker-version must not be empty")
+    if args.shutdown_timeout <= 0:
+        parser.error("--shutdown-timeout must be > 0")
     return args
 
 
@@ -133,7 +140,6 @@ def main():
         ),
     )
     args = parse_args()
-    shutdown_event = Event()
     application = MonitoringWorkerApplication(
         namespace=RedisNamespace(args.redis_prefix),
         max_streams=args.max_streams,
@@ -150,65 +156,28 @@ def main():
     console_client = None
     console_thread = None
     console_stop = Event()
-    command_thread = None
-    projection_thread = None
-    heartbeat_thread = None
-
-    def shutdown_handler(_signum, _frame):
-        shutdown_event.set()
-
-    signal.signal(signal.SIGINT, shutdown_handler)
-    signal.signal(signal.SIGTERM, shutdown_handler)
+    runner = MonitoringWorkerRunner(
+        application=application,
+        command_worker=args.command_worker,
+        shutdown_timeout=args.shutdown_timeout,
+    )
 
     try:
-        application.ping()
-        stream_id = None
         if args.url:
-            result = application.control.start(StreamConfig(
-                master_url=args.url,
-                stream_id=args.stream_id,
-                black_screen_enabled=(
-                    not args.disable_black_screen
-                ),
-                audio_loss_enabled=(
-                    not args.disable_audio_loss
-                ),
-                silence_threshold_dbfs=(
-                    args.silence_threshold_dbfs
-                ),
-                audio_loss_duration=args.audio_loss_duration,
-                audio_track_index=args.audio_track_index,
-                max_concurrent_media_processes=args.max_media_processes,
-            ))
-            stream_id = result.stream_id
-
-        # 1. Start public runtime status projection thread
-        projection_thread = Thread(
-            target=application.run_projection,
-            args=(shutdown_event,),
-            name="runtime-status-projector",
-            daemon=False,
-        )
-        projection_thread.start()
-
-        # 2. Start command consumer thread if in command-worker mode
-        if args.command_worker:
-            command_thread = Thread(
-                target=application.run_commands,
-                args=(shutdown_event,),
-                name="monitoring-command-consumer",
-                daemon=False,
+            application.ping()
+            result = application.control.start(
+                StreamConfig(
+                    master_url=args.url,
+                    stream_id=args.stream_id,
+                    black_screen_enabled=not args.disable_black_screen,
+                    audio_loss_enabled=not args.disable_audio_loss,
+                    silence_threshold_dbfs=args.silence_threshold_dbfs,
+                    audio_loss_duration=args.audio_loss_duration,
+                    audio_track_index=args.audio_track_index,
+                    max_concurrent_media_processes=args.max_media_processes,
+                )
             )
-            command_thread.start()
-
-        # 3. Start worker heartbeat thread
-        heartbeat_thread = Thread(
-            target=application.run_heartbeat,
-            args=(shutdown_event,),
-            name="worker-heartbeat",
-            daemon=False,
-        )
-        heartbeat_thread.start()
+            runner.stream_id = result.stream_id
 
         if args.console:
             console_client = RedisClient()
@@ -222,30 +191,14 @@ def main():
             )
             console_thread.start()
 
-        while not shutdown_event.wait(1.0):
-            if stream_id is not None and not args.command_worker:
-                snapshot = application.supervisor.snapshot(stream_id)
-                if snapshot is None or snapshot.status in (
-                    StreamSessionStatus.FAILED,
-                    StreamSessionStatus.STOPPED,
-                ):
-                    break
+        return runner.run(install_signal_handlers=True)
     finally:
-        shutdown_event.set()
-        application.projection_service.wake()
-        if heartbeat_thread is not None:
-            heartbeat_thread.join()
-        if command_thread is not None:
-            command_thread.join()
-        if projection_thread is not None:
-            projection_thread.join()
-        application.close()
+        runner.shutdown()
         console_stop.set()
         if console_thread is not None:
             console_thread.join(timeout=2.0)
         if console_client is not None:
             console_client.close()
 
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

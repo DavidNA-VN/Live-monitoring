@@ -60,6 +60,7 @@ class WorkerHeartbeatService:
 
         self.state: WorkerState = WorkerState.STARTING
         self._has_published_ready = False
+        self._stopping_event = Event()
         self.started_at: datetime = self._now()
 
     def _now(self) -> datetime:
@@ -74,6 +75,8 @@ class WorkerHeartbeatService:
             if self.command_consumer_ready_provider is not None
             else False
         )
+        if self._stopping_event.is_set():
+            return WorkerState.STOPPING, consumer_ready
         if self.command_consumer_required:
             if consumer_ready:
                 return WorkerState.READY, consumer_ready
@@ -81,6 +84,10 @@ class WorkerHeartbeatService:
                 return WorkerState.DEGRADED, consumer_ready
             return WorkerState.STARTING, consumer_ready
         return WorkerState.READY, consumer_ready
+
+    def request_stopping(self) -> None:
+        """Latch STOPPING so no later periodic heartbeat can return to READY."""
+        self._stopping_event.set()
 
     def build_heartbeat(self, state: WorkerState | None = None) -> WorkerHeartbeat:
         if state is not None:
@@ -141,8 +148,12 @@ class WorkerHeartbeatService:
 
     def run(self, stop_event: Event) -> None:
         """Periodic heartbeat loop until stop_event is signaled."""
-        # Initial starting publish
-        self.publish_heartbeat(state=WorkerState.STARTING)
+        initial_state = (
+            WorkerState.STOPPING
+            if self._stopping_event.is_set()
+            else WorkerState.STARTING
+        )
+        self.publish_heartbeat(state=initial_state)
 
         while not stop_event.is_set():
             stop_event.wait(timeout=self.heartbeat_interval)
@@ -150,6 +161,7 @@ class WorkerHeartbeatService:
                 self.publish_heartbeat()
 
         # Graceful shutdown state
+        self.request_stopping()
         self.publish_heartbeat(
             state=WorkerState.STOPPING,
             ttl_seconds=min(self.heartbeat_ttl, 15),

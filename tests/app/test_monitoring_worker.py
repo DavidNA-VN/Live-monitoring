@@ -66,7 +66,7 @@ def test_worker_close_can_be_retried_when_streams_do_not_drain():
         namespace=RedisNamespace("media-monitor:test:close"),
     )
     outcomes = iter((False, True))
-    application.supervisor.stop_all = lambda: next(outcomes)
+    application.supervisor.stop_all = lambda *args, **kwargs: next(outcomes)
     close_calls = []
     application.redis_client.close = lambda: close_calls.append(True)
 
@@ -97,5 +97,16 @@ def test_generated_worker_identity_does_not_reuse_consumer_name():
     try:
         assert application.worker_id.startswith("worker-")
         assert application.worker_id != "redis-consumer-01"
+    finally:
+        application.close()
+
+
+def test_worker_stop_streams_and_close_redis_methods():
+    application = MonitoringWorkerApplication(
+        namespace=RedisNamespace("media-monitor:test:stop-streams"),
+    )
+    try:
+        assert application.stop_streams(timeout=1.0) is True
+        application.close_redis()
     finally:
         application.close()

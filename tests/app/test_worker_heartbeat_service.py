@@ -195,3 +195,21 @@ def test_programming_error_from_readiness_provider_is_not_swallowed():
 
     with pytest.raises(RuntimeError, match="provider bug"):
         service.publish_heartbeat()
+
+
+def test_stopping_latch_prevents_periodic_ready_regression():
+    publisher = DummyPublisher()
+    service = WorkerHeartbeatService(
+        worker_id="worker-stopping-01",
+        supervisor=DummySupervisor(),
+        media_gate=ObservableProcessGate(max_concurrent=1),
+        publisher=publisher,
+        command_consumer_ready_provider=lambda: True,
+        command_consumer_required=True,
+    )
+
+    assert service.publish_heartbeat() is True
+    assert publisher.published[-1].state == WorkerState.READY
+    service.request_stopping()
+    assert service.publish_heartbeat() is True
+    assert publisher.published[-1].state == WorkerState.STOPPING

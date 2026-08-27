@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import Lock
+from time import monotonic
 from typing import Protocol
 
 from core.stream_session import (
@@ -145,7 +146,10 @@ class StreamSupervisor:
         if restart:
             self._start_slot(stream_id)
 
-    def stop_all(self) -> bool:
+    def stop_all(self, *, timeout: float | None = None) -> bool:
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be >= 0")
+        deadline = monotonic() + timeout if timeout is not None else None
         with self._lock:
             for slot in self._slots.values():
                 slot.desired_running = False
@@ -156,7 +160,12 @@ class StreamSupervisor:
             ]
         stopped = True
         for stream_id, session in sessions:
-            session_stopped = session.stop(timeout=self.shutdown_timeout)
+            stop_timeout = (
+                max(0.0, deadline - monotonic())
+                if deadline is not None
+                else self.shutdown_timeout
+            )
+            session_stopped = session.stop(timeout=stop_timeout)
             stopped = session_stopped and stopped
             if session_stopped:
                 with self._lock:

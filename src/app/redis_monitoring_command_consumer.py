@@ -28,9 +28,9 @@ from models.monitoring_command import (
 logger = logging.getLogger(__name__)
 
 
-class _CommandDeferred(RuntimeError):
+class _CommandDeferred(Exception):
     def __init__(self, entry_id: str, fields: dict[str, object]) -> None:
-        super().__init__(entry_id)
+        super().__init__(f"Command entry '{entry_id}' deferred")
         self.entry_id = entry_id
         self.fields = fields
 
@@ -73,7 +73,11 @@ class RedisMonitoringCommandConsumer:
             raise ValueError("poll_retry_backoff must be > 0")
         if not group_name or not consumer_name:
             raise ValueError("group_name and consumer_name must not be empty")
-        self.redis = getattr(redis_client, "client", redis_client)
+        self.redis = (
+            redis_client.client
+            if hasattr(redis_client, "client")
+            else redis_client
+        )
         self.handler = handler
         self.keys = keys or ControlRedisKeys()
         self.group_name = group_name
@@ -88,6 +92,7 @@ class RedisMonitoringCommandConsumer:
         self.poll_retry_backoff = poll_retry_backoff
         self._ready_event = Event()
         self._deferred_entries: list[tuple[str, dict[str, object]]] = []
+        self._waiting_for_pending_claim = False
 
     @property
     def is_ready(self) -> bool:
@@ -114,8 +119,8 @@ class RedisMonitoringCommandConsumer:
                         self.ensure_group()
                         group_ready = True
                         self._ready_event.set()
-                    self.poll_once()
-                    if self._deferred_entries:
+                    self.poll_once(stop_event)
+                    if self._deferred_entries or self._waiting_for_pending_claim:
                         stop_event.wait(self.poll_retry_backoff)
                 except redis.RedisError:
                     self._ready_event.clear()
@@ -125,24 +130,34 @@ class RedisMonitoringCommandConsumer:
         finally:
             self._ready_event.clear()
 
-    def poll_once(self) -> int:
-        entries = (
-            list(self._deferred_entries)
-            if self._deferred_entries
-            else self._claim_pending()
-        )
+    def poll_once(self, stop_event: Event | None = None) -> int:
+        if stop_event is not None and stop_event.is_set():
+            return 0
+
         processing_deferred = bool(self._deferred_entries)
-        if not entries and not processing_deferred:
-            response = self.redis.xreadgroup(
-                self.group_name,
-                self.consumer_name,
-                {self.keys.commands(): ">"},
-                count=self.batch_size,
-                block=self.block_milliseconds,
-            )
-            entries = response[0][1] if response else []
+        self._waiting_for_pending_claim = False
+        if processing_deferred:
+            entries = list(self._deferred_entries)
+        else:
+            entries = self._read_own_pending()
+            if not entries:
+                entries = self._claim_abandoned_pending()
+            if not entries:
+                if self._pending_count() > 0:
+                    self._waiting_for_pending_claim = True
+                    entries = []
+                else:
+                    entries = self._read_new_entries()
+
         processed = 0
         for index, (entry_id, fields) in enumerate(entries):
+            if stop_event is not None and stop_event.is_set() and index > 0:
+                self._deferred_entries = [
+                    *self._deferred_entries,
+                    *entries[index:],
+                ]
+                break
+
             try:
                 self._process(entry_id, fields)
             except _CommandDeferred as deferred:
@@ -152,12 +167,21 @@ class RedisMonitoringCommandConsumer:
                 ]
                 break
             else:
-                if processing_deferred:
+                if processing_deferred and self._deferred_entries:
                     self._deferred_entries.pop(0)
                 processed += 1
         return processed
 
-    def _claim_pending(self) -> list[tuple[str, dict[str, str]]]:
+    def _read_own_pending(self) -> list[tuple[str, dict[str, str]]]:
+        response = self.redis.xreadgroup(
+            self.group_name,
+            self.consumer_name,
+            {self.keys.commands(): "0"},
+            count=self.batch_size,
+        )
+        return response[0][1] if response else []
+
+    def _claim_abandoned_pending(self) -> list[tuple[str, dict[str, str]]]:
         response = self.redis.xautoclaim(
             self.keys.commands(),
             self.group_name,
@@ -170,12 +194,38 @@ class RedisMonitoringCommandConsumer:
             return []
         return response[1]
 
+    def _read_new_entries(self) -> list[tuple[str, dict[str, str]]]:
+        response = self.redis.xreadgroup(
+            self.group_name,
+            self.consumer_name,
+            {self.keys.commands(): ">"},
+            count=self.batch_size,
+            block=self.block_milliseconds,
+        )
+        return response[0][1] if response else []
+
+    def _pending_count(self) -> int:
+        summary = self.redis.xpending(
+            self.keys.commands(),
+            self.group_name,
+        )
+        if isinstance(summary, dict):
+            return int(summary.get("pending", 0))
+        if isinstance(summary, (tuple, list)) and summary:
+            return int(summary[0])
+        return 0
+
     def _process(self, entry_id: str, fields: dict[str, object]) -> None:
-        payload = self._field(fields, "payload")
         try:
+            payload = self._field(fields, "payload")
             command = MonitoringCommand.from_json(payload)
         except MonitoringCommandError as exc:
-            self._dead_letter(entry_id, payload, "INVALID_COMMAND", str(exc))
+            self._dead_letter(
+                entry_id,
+                self._text(fields.get("payload", "")),
+                "INVALID_COMMAND",
+                str(exc),
+            )
             return
 
         processed_key = self.keys.processed_command(command.command_id)
@@ -212,6 +262,8 @@ class RedisMonitoringCommandConsumer:
                 exc_info=True,
             )
             raise _CommandDeferred(entry_id, fields)
+        except redis.RedisError:
+            raise
         except (StreamConfigMappingError, ValueError) as exc:
             result = self._failure_result(
                 command,
@@ -304,23 +356,23 @@ class RedisMonitoringCommandConsumer:
             try:
                 self.on_command_finalized()
             except Exception:
-                logger.warning("on_command_finalized callback failed", exc_info=True)
+                logger.exception("Failed to invoke on_command_finalized callback")
 
     def _dead_letter(
         self,
         entry_id: str,
-        payload: object,
+        payload: str,
         error_code: str,
-        error: str,
+        error_message: str,
     ) -> None:
         pipeline = self.redis.pipeline(transaction=True)
         pipeline.xadd(
             self.keys.dead_letter(),
             {
                 "source_entry_id": entry_id,
-                "payload": self._text(payload),
+                "payload": payload,
                 "error_code": error_code,
-                "error": error,
+                "error": error_message,
                 "failed_at": datetime.now(timezone.utc).isoformat(),
             },
             maxlen=self.dead_letter_max_length,
@@ -329,12 +381,12 @@ class RedisMonitoringCommandConsumer:
         pipeline.xack(self.keys.commands(), self.group_name, entry_id)
         pipeline.execute()
 
-    @staticmethod
     def _failure_result(
+        self,
         command: MonitoringCommand,
         status: MonitoringCommandResultStatus,
         error_code: str,
-        error: str,
+        error_message: str,
     ) -> MonitoringCommandResult:
         return MonitoringCommandResult(
             command_id=command.command_id,
@@ -344,17 +396,16 @@ class RedisMonitoringCommandConsumer:
             changed=False,
             processed_at=datetime.now(timezone.utc),
             error_code=error_code,
-            error=error,
+            error=error_message,
         )
 
-    @classmethod
-    def _field(cls, fields: dict[str, object], name: str) -> object:
-        if name in fields:
-            return fields[name]
-        return fields.get(name.encode("utf-8"), "")
+    def _field(self, fields: dict[str, object], name: str) -> str:
+        for key, value in fields.items():
+            if self._text(key) == name:
+                return self._text(value)
+        raise MonitoringCommandError(f"Missing '{name}' field in stream entry")
 
-    @staticmethod
-    def _text(value: object) -> str:
+    def _text(self, value: object) -> str:
         if isinstance(value, bytes):
             return value.decode("utf-8", errors="replace")
         return str(value)

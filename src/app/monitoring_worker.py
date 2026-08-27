@@ -136,6 +136,7 @@ class MonitoringWorkerApplication:
             discovery_window=worker_discovery_window,
         )
         self._closed = False
+        self._redis_closed = False
 
     def ping(self) -> None:
         self.redis_client.ping()
@@ -164,12 +165,21 @@ class MonitoringWorkerApplication:
     def run_heartbeat(self, stop_event: Event) -> None:
         self.heartbeat_service.run(stop_event)
 
-    def close(self) -> bool:
+    def stop_streams(self, timeout: float | None = None) -> bool:
+        return self.supervisor.stop_all(timeout=timeout)
+
+    def close_redis(self) -> None:
+        if self._redis_closed:
+            return
+        self.redis_client.close()
+        self._redis_closed = True
+
+    def close(self, timeout: float | None = None) -> bool:
         if self._closed:
             return True
-        stopped = self.supervisor.stop_all()
+        stopped = self.stop_streams(timeout=timeout)
         if not stopped:
             return False
-        self.redis_client.close()
+        self.close_redis()
         self._closed = True
         return True
