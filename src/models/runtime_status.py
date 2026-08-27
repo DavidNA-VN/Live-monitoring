@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import math
+import re
 from types import MappingProxyType
 from typing import Any
 
 RUNTIME_STATUS_SCHEMA_VERSION = "1.0"
+WORKER_ID_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class PublicStreamStatus(str, Enum):
@@ -56,6 +58,8 @@ class RuntimeStatus:
     telemetry_available: bool = True
     health_reasons: tuple[str, ...] = ()
     schema_version: str = RUNTIME_STATUS_SCHEMA_VERSION
+    worker_id: str | None = None
+    observed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.active_variant_count < 0:
@@ -67,10 +71,30 @@ class RuntimeStatus:
             or self.queue_lag_seconds < 0
         ):
             raise ValueError("queue_lag_seconds must be finite and >= 0")
+        if self.worker_id is not None:
+            if not isinstance(self.worker_id, str) or not WORKER_ID_REGEX.match(self.worker_id):
+                raise ValueError(f"Invalid worker_id '{self.worker_id}'")
+        if self.observed_at is not None:
+            if not isinstance(self.observed_at, datetime):
+                raise ValueError("observed_at must be a datetime")
+            if self.observed_at.tzinfo is None:
+                object.__setattr__(self, "observed_at", self.observed_at.replace(tzinfo=timezone.utc))
+            else:
+                object.__setattr__(self, "observed_at", self.observed_at.astimezone(timezone.utc))
+        if self.started_at is not None:
+            if self.started_at.tzinfo is None:
+                object.__setattr__(self, "started_at", self.started_at.replace(tzinfo=timezone.utc))
+            else:
+                object.__setattr__(self, "started_at", self.started_at.astimezone(timezone.utc))
+        if self.last_poll_at is not None:
+            if self.last_poll_at.tzinfo is None:
+                object.__setattr__(self, "last_poll_at", self.last_poll_at.replace(tzinfo=timezone.utc))
+            else:
+                object.__setattr__(self, "last_poll_at", self.last_poll_at.astimezone(timezone.utc))
         object.__setattr__(self, "checks", MappingProxyType(dict(self.checks)))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": self.schema_version,
             "stream_id": self.stream_id,
             "status": self.status.value,
@@ -90,3 +114,8 @@ class RuntimeStatus:
                 for name, status in self.checks.items()
             },
         }
+        if self.worker_id is not None:
+            payload["worker_id"] = self.worker_id
+        if self.observed_at is not None:
+            payload["observed_at"] = _format_datetime(self.observed_at)
+        return payload

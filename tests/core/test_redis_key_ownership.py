@@ -4,6 +4,7 @@ from core.redis_keys import (
     AlertRedisKeys,
     ControlRedisKeys,
     ProcessingRedisKeys,
+    PublicRuntimeRedisKeys,
     RedisNamespace,
     RuntimeRedisKeys,
 )
@@ -14,6 +15,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     namespace = RedisNamespace(":monitor:test:")
     processing = ProcessingRedisKeys(namespace)
     runtime = RuntimeRedisKeys(namespace)
+    public_runtime = PublicRuntimeRedisKeys(namespace)
     alerts = AlertRedisKeys(namespace)
     control = ControlRedisKeys(namespace)
     black = BlackScreenRedisKeys(namespace)
@@ -21,12 +23,14 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
 
     assert processing.namespace is namespace
     assert runtime.namespace is namespace
+    assert public_runtime.namespace is namespace
     assert alerts.namespace is namespace
     assert control.namespace is namespace
     assert black.namespace is namespace
     assert audio.namespace is namespace
     assert not hasattr(processing, "open_event")
     assert not hasattr(runtime, "segment_state")
+    assert not hasattr(public_runtime, "health")
     assert not hasattr(alerts, "health")
     assert not hasattr(control, "segment_state")
     assert not hasattr(black, "outbox")
@@ -70,6 +74,14 @@ def test_core_key_schemas_are_stable():
     )
     assert control.dead_letter() == (
         "monitor:test:monitoring:command-dead-letter"
+    )
+
+    public_runtime = PublicRuntimeRedisKeys(namespace)
+    assert public_runtime.current_statuses() == (
+        "monitor:test:public:runtime-status"
+    )
+    assert public_runtime.status_updates() == (
+        "monitor:test:public:runtime-status-updates"
     )
 
 

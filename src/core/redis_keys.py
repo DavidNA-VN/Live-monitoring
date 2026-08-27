@@ -108,3 +108,18 @@ class ControlRedisKeys:
     def processed_command(self, command_id: str) -> str:
         digest = sha256(command_id.encode("utf-8")).hexdigest()[:32]
         return f"{self.prefix}:monitoring:processed:{digest}"
+
+
+class PublicRuntimeRedisKeys:
+    def __init__(self, namespace: RedisNamespace | None = None) -> None:
+        self.namespace = namespace or RedisNamespace()
+
+    @property
+    def prefix(self) -> str:
+        return self.namespace.prefix
+
+    def current_statuses(self) -> str:
+        return f"{self.prefix}:public:runtime-status"
+
+    def status_updates(self) -> str:
+        return f"{self.prefix}:public:runtime-status-updates"

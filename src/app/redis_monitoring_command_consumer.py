@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 import logging
 from threading import Event
-from typing import Any
+from typing import Any, Callable
 
 import redis
 
@@ -44,6 +44,7 @@ class RedisMonitoringCommandConsumer:
         result_max_length: int = 10_000,
         dead_letter_max_length: int = 1_000,
         processed_ttl_seconds: int = 86_400,
+        on_command_finalized: Callable[[], None] | None = None,
     ) -> None:
         positive = {
             "block_milliseconds": block_milliseconds,
@@ -69,6 +70,7 @@ class RedisMonitoringCommandConsumer:
         self.result_max_length = result_max_length
         self.dead_letter_max_length = dead_letter_max_length
         self.processed_ttl_seconds = processed_ttl_seconds
+        self.on_command_finalized = on_command_finalized
 
     def ensure_group(self) -> None:
         try:
@@ -245,6 +247,11 @@ class RedisMonitoringCommandConsumer:
             )
         pipeline.xack(self.keys.commands(), self.group_name, entry_id)
         pipeline.execute()
+        if self.on_command_finalized is not None:
+            try:
+                self.on_command_finalized()
+            except Exception:
+                logger.warning("on_command_finalized callback failed", exc_info=True)
 
     def _dead_letter(
         self,

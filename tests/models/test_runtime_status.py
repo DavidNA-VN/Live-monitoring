@@ -129,3 +129,38 @@ def test_runtime_status_rejects_invalid_queue_lag(invalid_lag):
             queue_lag_seconds=invalid_lag,
             checks={},
         )
+
+
+def test_runtime_status_with_worker_id_and_observed_at():
+    schema = load_schema("runtime-status.schema.json")
+    local_observed = datetime.fromisoformat("2026-08-27T17:00:00+07:00")
+    status = RuntimeStatus(
+        stream_id="channel-05",
+        status=PublicStreamStatus.RUNNING,
+        health=RuntimeHealth.HEALTHY,
+        active_variant_count=2,
+        queue_depth=0,
+        checks={"black_screen": CheckStatus.ENABLED},
+        worker_id="worker-local-01",
+        observed_at=local_observed,
+    )
+
+    data = status.to_dict()
+    assert data["worker_id"] == "worker-local-01"
+    assert data["observed_at"] == "2026-08-27T10:00:00+00:00"
+    assert "worker_id" in schema["properties"]
+    assert "observed_at" in schema["properties"]
+
+
+@pytest.mark.parametrize("invalid_worker_id", ["", "-invalid", ".invalid", "worker@node", "w" * 129])
+def test_runtime_status_rejects_invalid_worker_id(invalid_worker_id):
+    with pytest.raises(ValueError, match="Invalid worker_id"):
+        RuntimeStatus(
+            stream_id="channel-06",
+            status=PublicStreamStatus.RUNNING,
+            health=RuntimeHealth.HEALTHY,
+            active_variant_count=1,
+            queue_depth=0,
+            checks={},
+            worker_id=invalid_worker_id,
+        )

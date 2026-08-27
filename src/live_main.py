@@ -72,11 +72,24 @@ def parse_args(argv=None):
     parser.add_argument("--max-streams", type=int, default=16)
     parser.add_argument("--redis-prefix", default="media-monitor:v1")
     parser.add_argument("--consumer-name", default=None)
+    parser.add_argument(
+        "--worker-id",
+        default=None,
+        help="Explicit unique worker identity (e.g. worker-local-01)",
+    )
+    parser.add_argument(
+        "--projection-interval",
+        type=float,
+        default=2.0,
+        help="Runtime status projection cycle interval in seconds",
+    )
     args = parser.parse_args(argv)
     if not args.url and not args.command_worker:
         parser.error("one of --url or --command-worker is required")
     if args.max_streams <= 0:
         parser.error("--max-streams must be > 0")
+    if args.projection_interval <= 0:
+        parser.error("--projection-interval must be > 0")
     return args
 
 
@@ -94,11 +107,14 @@ def main():
         max_streams=args.max_streams,
         max_concurrent_media_processes=args.max_service_media_processes,
         consumer_name=args.consumer_name,
+        worker_id=args.worker_id,
+        projection_interval=args.projection_interval,
     )
     console_client = None
     console_thread = None
     console_stop = Event()
     command_thread = None
+    projection_thread = None
 
     def shutdown_handler(_signum, _frame):
         shutdown_event.set()
@@ -127,6 +143,16 @@ def main():
                 max_concurrent_media_processes=args.max_media_processes,
             ))
             stream_id = result.stream_id
+
+        # Start public runtime status projection thread
+        projection_thread = Thread(
+            target=application.run_projection,
+            args=(shutdown_event,),
+            name="runtime-status-projector",
+            daemon=False,
+        )
+        projection_thread.start()
+
         if args.command_worker:
             command_thread = Thread(
                 target=application.run_commands,
@@ -157,8 +183,11 @@ def main():
                     break
     finally:
         shutdown_event.set()
+        application.projection_service.wake()
         if command_thread is not None:
-            command_thread.join(timeout=2.0)
+            command_thread.join()
+        if projection_thread is not None:
+            projection_thread.join()
         application.close()
         console_stop.set()
         if console_thread is not None:
