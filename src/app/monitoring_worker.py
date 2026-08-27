@@ -32,7 +32,7 @@ from core.redis_keys import (
     RuntimeRedisKeys,
     WorkerRedisKeys,
 )
-from core.stream_supervisor import StreamSupervisor
+from core.stream_supervisor import StreamSessionFactory, StreamSupervisor
 from models.runtime_status import WORKER_ID_REGEX
 
 
@@ -47,6 +47,7 @@ class MonitoringWorkerApplication:
         *,
         redis_settings: RedisSettings | None = None,
         namespace: RedisNamespace | None = None,
+        session_factory: StreamSessionFactory | None = None,
         max_streams: int = 16,
         max_concurrent_media_processes: int = 8,
         consumer_name: str | None = None,
@@ -67,13 +68,14 @@ class MonitoringWorkerApplication:
 
         self.media_gate = ObservableProcessGate(max_concurrent_media_processes)
         self.redis_client = RedisClient(redis_settings)
+        effective_factory = session_factory or MonitoringSessionFactory(
+            redis_settings=redis_settings,
+            namespace=self.namespace,
+            max_concurrent_media_processes=max_concurrent_media_processes,
+            service_media_process_gate=self.media_gate,
+        )
         self.supervisor = StreamSupervisor(
-            session_factory=MonitoringSessionFactory(
-                redis_settings=redis_settings,
-                namespace=self.namespace,
-                max_concurrent_media_processes=max_concurrent_media_processes,
-                service_media_process_gate=self.media_gate,
-            ),
+            session_factory=effective_factory,
             max_streams=max_streams,
         )
         self.control = SupervisorMonitoringControl(self.supervisor)

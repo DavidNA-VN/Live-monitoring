@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 
 import m3u8
 
@@ -225,8 +226,9 @@ def publish(
     start_sequence: int,
     loop: bool,
     reset: bool,
-    max_publishes: int | None,
-    speed: float,
+    max_publishes: int | None = None,
+    speed: float = 1.0,
+    stop_event: Event | None = None,
 ) -> None:
     if window_size <= 0:
         raise ValueError("window_size must be > 0")
@@ -268,6 +270,8 @@ def publish(
     print()
 
     while True:
+        if stop_event is not None and stop_event.is_set():
+            break
         starts_new_loop = False
         if template_index >= len(variants[0].segments):
             if not loop:
@@ -317,7 +321,11 @@ def publish(
         template_index += 1
         sequence += 1
         program_time += timedelta(seconds=current_duration)
-        time.sleep(current_duration / speed)
+        if stop_event is not None:
+            if stop_event.wait(current_duration / speed):
+                break
+        else:
+            time.sleep(current_duration / speed)
 
     print("Publisher completed.")
 
