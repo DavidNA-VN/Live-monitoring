@@ -155,7 +155,7 @@ def test_variants_do_not_overwrite_open_state_or_alerts(redis_context):
     assert len(emitted) == 2
     assert emitted[0].event_id != emitted[1].event_id
     assert {
-        item.attributes["variant_stable_id"] for item in emitted
+        item.variant_stable_id for item in emitted
     } == {"stable-720", "stable-1080"}
 
 
