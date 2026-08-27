@@ -144,6 +144,9 @@ def test_live_loops_are_deterministic_and_drain_queue():
                 max_streams=1,
             )
             stream_id = supervisor.add(config)
+            stored_config = supervisor.configuration(stream_id)
+            assert stored_config is not None
+            storage_id = stored_config.identity.storage_id
 
             deadline = time.monotonic() + validation_timeout
             alerts = []
@@ -159,7 +162,7 @@ def test_live_loops_are_deterministic_and_drain_queue():
                     stream_id,
                 )
                 metrics = redis_client.client.hgetall(
-                    runtime_keys.metrics(stream_id)
+                    runtime_keys.metrics(storage_id)
                 )
                 publisher_done = (
                     publisher_thread is not None
@@ -184,7 +187,8 @@ def test_live_loops_are_deterministic_and_drain_queue():
             assert len(alerts) == expected_alert_count, diagnostic
             by_variant: dict[str, list[AlertEnvelope]] = {}
             for alert in alerts:
-                stable_id = alert.attributes["variant_stable_id"]
+                stable_id = alert.variant_stable_id
+                assert stable_id is not None
                 by_variant.setdefault(stable_id, []).append(alert)
             assert len(by_variant) == 2
             for variant_alerts in by_variant.values():
@@ -201,7 +205,7 @@ def test_live_loops_are_deterministic_and_drain_queue():
                     assert opened.event_id == resolved.event_id
 
             metrics = redis_client.client.hgetall(
-                runtime_keys.metrics(stream_id)
+                runtime_keys.metrics(storage_id)
             )
             assert metrics["queue_depth"] == "0"
             assert metrics["dropped_work"] == "0"
