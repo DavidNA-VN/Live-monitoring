@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-monitor.local/contracts/alert-message.schema.json",
+  "title": "AlertMessageDTO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "message_type",
+    "stream_id",
+    "payload"
+  ],
+  "properties": {
+    "message_type": {
+      "const": "ALERT"
+    },
+    "stream_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "payload": {
+      "$ref": "./alert.schema.json"
+    }
+  }
+}

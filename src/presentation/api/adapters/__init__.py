@@ -1,0 +1,1 @@
+# presentation.api.adapters package

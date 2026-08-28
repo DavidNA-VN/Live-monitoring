@@ -110,6 +110,14 @@ class ControlRedisKeys:
         digest = sha256(command_id.encode("utf-8")).hexdigest()[:32]
         return f"{self.prefix}:monitoring:processed:{digest}"
 
+    def submitted_command(self, command_id: str) -> str:
+        digest = sha256(command_id.encode("utf-8")).hexdigest()[:32]
+        return f"{self.prefix}:monitoring:submitted:{digest}"
+
+    def idempotency_key(self, idempotency_key: str) -> str:
+        digest = sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
+        return f"{self.prefix}:monitoring:idempotency:{digest}"
+
 
 class PublicRuntimeRedisKeys:
     def __init__(self, namespace: RedisNamespace | None = None) -> None:

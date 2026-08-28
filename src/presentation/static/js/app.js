@@ -1,4 +1,4 @@
-const API_BASE = window.location.origin;
+const API_BASE = `${window.location.origin}/api/v1`;
 
 // DOM Elements
 const wsStatusDot = document.querySelector('.dot');
@@ -237,7 +237,7 @@ function addLog(msg, stateClass = 'system-msg') {
 function connectWebSocket() {
     if (websocket) websocket.close();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    websocket = new WebSocket(`${protocol}//${window.location.host}/ws/streams/${currentStreamId}`);
+    websocket = new WebSocket(`${protocol}//${window.location.host}/api/v1/ws/streams/${currentStreamId}`);
 
     websocket.onopen = () => {
         wsStatusDot.className = 'dot connected';

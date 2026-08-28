@@ -1,32 +1,82 @@
-from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Literal, Optional
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class PresentationDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 # Cấu hình kiểm tra màn hình đen
-class BlackScreenCheck(BaseModel):
+class BlackScreenCheck(PresentationDTO):
     enabled: bool
 
 # Cấu hình kiểm tra mất âm thanh
-class AudioLossCheck(BaseModel):
+class AudioLossCheck(PresentationDTO):
     enabled: bool
     threshold_dbfs: float = Field(..., le=0)
     duration_seconds: float = Field(..., gt=0)
     track_index: int = Field(default=0, ge=0)
 
 # Gom nhóm các kiểm tra (checks)
-class StreamChecks(BaseModel):
+class StreamChecks(PresentationDTO):
     black_screen: BlackScreenCheck
     audio_loss: AudioLossCheck
 
 # DTO: Data Transfer Object dùng để nhận request tạo stream mới từ UI
-class StreamConfigDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid") # Cấm truyền field lạ không có trong schema
+class StreamConfigDTO(PresentationDTO):
     
     schema_version: Literal["1.0"] = "1.0"
     stream_id: str = Field(..., min_length=1, max_length=128)
     master_url: str = Field(..., min_length=1)
     checks: StreamChecks
+
+    @field_validator("master_url")
+    @classmethod
+    def validate_master_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("master_url must be an absolute HTTP(S) URL")
+        return value
+
+# Loại lệnh điều khiển
+class CommandTypeEnum(str, Enum):
+    START = "START"
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+    STOP = "STOP"
+    UPDATE_CONFIG = "UPDATE_CONFIG"
+
+# Trạng thái kết quả thực thi lệnh
+class CommandResultStatusEnum(str, Enum):
+    APPLIED = "APPLIED"
+    NOOP = "NOOP"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+# DTO phản hồi khi tiếp nhận lệnh (202 Accepted)
+class CommandSubmissionDTO(PresentationDTO):
+
+    schema_version: Literal["1.0"] = "1.0"
+    command_id: str = Field(..., min_length=1)
+    stream_id: str = Field(..., min_length=1, max_length=128)
+    status: Literal["ACCEPTED"] = "ACCEPTED"
+    message: Optional[str] = None
+
+# DTO trả về khi tra cứu kết quả xử lý của một lệnh
+class CommandResultDTO(PresentationDTO):
+
+    schema_version: Literal["1.0"] = "1.0"
+    command_id: str = Field(..., min_length=1)
+    command_type: CommandTypeEnum
+    stream_id: str = Field(..., min_length=1, max_length=128)
+    status: CommandResultStatusEnum
+    changed: bool
+    processed_at: datetime
+    error_code: Optional[str] = None
+    error: Optional[str] = None
 
 # Phân loại Alert: lỗi nội dung (video/audio) hay lỗi hệ thống (runtime)
 class AlertCategory(str, Enum):
@@ -49,8 +99,7 @@ class AlertState(str, Enum):
     RECOVERED = "RECOVERED"
 
 # DTO mô tả thông tin Cảnh báo (Alert) gửi qua WebSocket
-class AlertDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AlertDTO(PresentationDTO):
 
     schema_version: Literal["1.0"] = "1.0"
     alert_id: str = Field(..., min_length=1)
@@ -67,7 +116,21 @@ class AlertDTO(BaseModel):
     event_started_at: Optional[datetime] = None
     event_ended_at: Optional[datetime] = None
     reason: str = Field(..., min_length=1)
-    attributes: Optional[Dict[str, str]] = None
+    attributes: Dict[str, str] = Field(default_factory=dict)
+
+# DTO bao gói Cảnh báo gửi qua WebSocket Realtime
+class AlertMessageDTO(PresentationDTO):
+    message_type: Literal["ALERT"] = "ALERT"
+    stream_id: str = Field(..., min_length=1, max_length=128)
+    payload: AlertDTO
+
+    @model_validator(mode="after")
+    def verify_stream_id_match(self) -> "AlertMessageDTO":
+        if self.stream_id != self.payload.stream_id:
+            raise ValueError(
+                f"Envelope stream_id '{self.stream_id}' does not match payload stream_id '{self.payload.stream_id}'"
+            )
+        return self
 
 # Trạng thái vòng đời của luồng live
 class StreamStatusEnum(str, Enum):
@@ -87,8 +150,7 @@ class StreamHealthEnum(str, Enum):
     UNHEALTHY = "UNHEALTHY"
 
 # DTO trả về khi gọi API lấy Status của Stream
-class RuntimeStatusDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RuntimeStatusDTO(PresentationDTO):
 
     schema_version: Literal["1.0"] = "1.0"
     stream_id: str = Field(..., min_length=1, max_length=128)
@@ -101,5 +163,7 @@ class RuntimeStatusDTO(BaseModel):
     queue_lag_seconds: Optional[float] = Field(None, ge=0)
     error: Optional[str] = None
     telemetry_available: bool = False
-    health_reasons: Optional[List[str]] = None
+    health_reasons: List[str] = Field(default_factory=list)
     checks: Dict[str, Literal["ENABLED", "DISABLED"]]
+    worker_id: Optional[str] = Field(None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    observed_at: Optional[datetime] = None
