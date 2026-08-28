@@ -20,6 +20,8 @@ def redis_context():
         client.ping()
     except Exception as exc:
         client.close()
+        if os.getenv("REQUIRE_MVP_E2E") == "1":
+            pytest.fail(f"Disposable Redis is required for MVP E2E tests: {exc}")
         pytest.skip(f"Disposable Redis is unavailable for E2E tests: {exc}")
 
     namespace = RedisNamespace(f"media-monitor:e2e:{uuid4().hex}")
