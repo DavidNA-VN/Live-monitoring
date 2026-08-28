@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
@@ -25,11 +26,12 @@ from .adapters.base import (
     MonitoringControl,
     RuntimeStatusReader,
 )
-from .adapters.fakes import FakeAlertSource, FakeMonitoringControl
 from .adapters.errors import (
     PresentationConflictError,
     PresentationServiceUnavailableError,
 )
+from .adapters.fakes import FakeAlertSource, FakeMonitoringControl
+from .composition import PresentationDependencies, build_dependencies
 from .models import (
     AlertDTO,
     AlertMessageDTO,
@@ -38,69 +40,101 @@ from .models import (
     RuntimeStatusDTO,
     StreamConfigDTO,
 )
+from .settings import ApiSettings
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(
+    *,
+    settings: Optional[ApiSettings] = None,
+    dependencies: Optional[PresentationDependencies] = None,
+    # Backward-compatible convenience arguments for tests
     control: Optional[MonitoringControl] = None,
     command_results: Optional[CommandResultReader] = None,
     status_reader: Optional[RuntimeStatusReader] = None,
     alert_source: Optional[AlertSource] = None,
-    enable_fake_generator: bool = True,
+    enable_fake_generator: Optional[bool] = None,
 ) -> FastAPI:
     """
     App Factory tạo ứng dụng FastAPI cho Presentation / Dashboard.
-    Cho phép inject các adapter (Fake hoặc Redis) phục vụ kiểm thử và vận hành.
+    Hỗ trợ khởi tạo tự động từ ApiSettings (fake hoặc redis mode) hoặc inject PresentationDependencies.
     """
-    if control is None:
-        default_control = FakeMonitoringControl()
-        control_adapter = default_control
-        command_result_adapter = command_results or default_control
-        status_adapter = status_reader or default_control
-    else:
-        control_adapter = control
-        command_result_adapter = command_results or (
-            control if isinstance(control, CommandResultReader) else None
-        )
-        status_adapter = status_reader or (
-            control if isinstance(control, RuntimeStatusReader) else None
-        )
-        if command_result_adapter is None or status_adapter is None:
-            raise ValueError(
-                "Custom control requires command_results and status_reader"
+    injected_deps: Optional[PresentationDependencies] = dependencies
+
+    if injected_deps is None and (
+        control is not None
+        or command_results is not None
+        or status_reader is not None
+        or alert_source is not None
+    ):
+        # Backward-compatible explicit adapter injection for tests
+        if control is None:
+            default_control = FakeMonitoringControl()
+            control_adapter = default_control
+            command_result_adapter = command_results or default_control
+            status_adapter = status_reader or default_control
+        else:
+            control_adapter = control
+            command_result_adapter = command_results or (
+                control if isinstance(control, CommandResultReader) else None
             )
-    alert_adapter = alert_source or FakeAlertSource()
+            status_adapter = status_reader or (
+                control if isinstance(control, RuntimeStatusReader) else None
+            )
+            if command_result_adapter is None or status_adapter is None:
+                raise ValueError(
+                    "Custom control requires command_results and status_reader"
+                )
+        alert_adapter = alert_source or FakeAlertSource()
+        fake_gen = enable_fake_generator if enable_fake_generator is not None else False
+        injected_deps = PresentationDependencies(
+            control=control_adapter,
+            command_results=command_result_adapter,
+            status_reader=status_adapter,
+            alert_source=alert_adapter,
+            redis_client=None,
+            mode="fake",
+            enable_fake_generator=fake_gen,
+        )
+
+    effective_settings = settings
+    if injected_deps is None and effective_settings is None:
+        effective_settings = ApiSettings.from_env()
+    if enable_fake_generator is not None and injected_deps is None:
+        assert effective_settings is not None
+        effective_settings = ApiSettings(
+            mode=effective_settings.mode,
+            redis_url=effective_settings.redis_url,
+            redis_prefix=effective_settings.redis_prefix,
+            alert_history_scan_limit=effective_settings.alert_history_scan_limit,
+            websocket_redis_block_ms=effective_settings.websocket_redis_block_ms,
+            enable_fake_generator=enable_fake_generator,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
-        app.state.control = control_adapter
-        app.state.command_results = command_result_adapter
-        app.state.status_reader = status_adapter
-        app.state.alert_source = alert_adapter
-        app.state.enable_fake_generator = enable_fake_generator
-        yield
-        # Shutdown: dọn dẹp sạch sẽ background tasks và connections
-        resources = (
-            app.state.alert_source,
-            app.state.control,
-            app.state.command_results,
-            app.state.status_reader,
-        )
-        closed: set[int] = set()
-        for resource in resources:
-            if id(resource) in closed:
-                continue
-            closed.add(id(resource))
-            try:
-                await resource.close()
-            except Exception as exc:
-                logger.warning(
-                    "Error closing %s during shutdown: %s",
-                    type(resource).__name__,
-                    exc,
-                )
+        if injected_deps is not None:
+            deps = injected_deps
+        else:
+            assert effective_settings is not None
+            deps = await build_dependencies(effective_settings)
+
+        app.state.dependencies = deps
+        app.state.control = deps.control
+        app.state.command_results = deps.command_results
+        app.state.status_reader = deps.status_reader
+        app.state.alert_source = deps.alert_source
+        app.state.enable_fake_generator = deps.enable_fake_generator
+
+        logger.info("Live Monitoring API started in '%s' mode", deps.mode)
+        try:
+            yield
+        finally:
+            logger.info("Shutting down Live Monitoring API...")
+            await deps.close()
+            logger.info("Live Monitoring API shutdown complete")
 
     app = FastAPI(
         title="Live Monitoring API",
@@ -127,6 +161,57 @@ def create_app(
             status_code=503,
             content={"detail": "Monitoring service is temporarily unavailable"},
         )
+
+    # Health & Readiness Check Endpoints
+    @app.get("/health/live")
+    async def health_live() -> dict[str, str]:
+        """Liveness probe: kiểm tra process event loop còn hoạt động."""
+        return {"status": "alive"}
+
+    @app.get("/health/ready")
+    async def health_ready() -> JSONResponse:
+        """Readiness probe: kiểm tra các dependency cần thiết (Redis trong redis mode)."""
+        deps: Optional[PresentationDependencies] = getattr(app.state, "dependencies", None)
+        if deps is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "detail": "Dependencies not initialized"},
+            )
+
+        if deps.mode == "fake":
+            return JSONResponse(status_code=200, content={"status": "ready", "mode": "fake"})
+
+        # Redis mode: Ping Redis
+        if deps.redis_client is None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "mode": "redis",
+                    "dependencies": {"redis": "unavailable"},
+                },
+            )
+
+        try:
+            await asyncio.wait_for(deps.redis_client.ping(), timeout=1.0)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "ready",
+                    "mode": "redis",
+                    "dependencies": {"redis": "available"},
+                },
+            )
+        except Exception as exc:
+            logger.warning("Redis readiness probe failed: %s", type(exc).__name__)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "mode": "redis",
+                    "dependencies": {"redis": "unavailable"},
+                },
+            )
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.exists():
