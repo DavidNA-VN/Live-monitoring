@@ -13,16 +13,12 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 </head>
 <body>
-    <div class="background-blobs">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
-    </div>
-
     <div class="dashboard-container">
-        <!-- THANH TOP (Input URL) -->
+        <!-- THANH TOP (Input URL & Mode) -->
         <header class="top-bar glass-panel">
             <div class="logo">
                 <span class="gradient-text">LIVE MONITORING</span>
+                <span id="mode-badge" class="mode-tag mode-unknown">MODE: UNKNOWN</span>
             </div>
             <form id="stream-form" class="url-input-form">
                 <input type="text" id="stream-id" value="channel-01" required placeholder="Stream ID (VD: ch-01)" class="small-input">
@@ -30,7 +26,8 @@
                 <button type="submit" class="btn btn-primary" id="btn-start">Connect</button>
             </form>
             <div class="connection-status" id="ws-status">
-                <span class="dot standby"></span> STANDBY
+                <span class="dot standby"></span>
+                <span id="ws-status-text">STANDBY</span>
             </div>
         </header>
 
@@ -40,10 +37,10 @@
                 <section class="video-section glass-panel">
                     <div class="video-wrapper">
                         <!-- Trình phát video thật -->
-                        <video id="live-video" controls muted autoplay></video>
+                        <video id="live-video" controls muted playsinline></video>
                     </div>
                     
-                    <!-- Thanh Audio Meter giả lập OBS -->
+                    <!-- Thanh Audio Meter -->
                     <div class="audio-meter-container" title="Audio Meter">
                         <div class="audio-meter-bg">
                             <div id="audio-level" class="audio-level"></div>
@@ -56,15 +53,15 @@
                     <div class="telemetry-header">
                         <h2>Telemetry</h2>
                         <div class="control-actions">
-                            <button type="button" class="btn btn-secondary" id="btn-pause">Pause</button>
-                            <button type="button" class="btn btn-secondary" id="btn-resume">Resume</button>
-                            <button type="button" class="btn btn-danger" id="btn-stop">Stop</button>
+                            <button type="button" class="btn btn-secondary" id="btn-pause" disabled>Pause</button>
+                            <button type="button" class="btn btn-secondary" id="btn-resume" disabled>Resume</button>
+                            <button type="button" class="btn btn-danger" id="btn-stop" disabled>Stop</button>
                         </div>
                     </div>
                     <div class="telemetry-grid">
                         <div class="stat-box" id="stat-status">
                             <span class="label">System Status</span>
-                            <span class="val">UNKNOWN</span>
+                            <span class="val">IDLE</span>
                         </div>
                         <div class="stat-box" id="stat-resolution">
                             <span class="label">Resolution</span>
@@ -87,14 +84,17 @@
                 <div class="event-log-panel glass-panel full-height">
                     <h2>Event Log</h2>
                     <div id="event-log-container" class="log-container">
-                        <div class="log-entry system-msg">[System] Bảng điều khiển đã sẵn sàng.</div>
+                        <div class="log-entry system-msg">
+                            <span class="log-time">[System]</span>
+                            <span>Bảng điều khiển đã sẵn sàng.</span>
+                        </div>
                     </div>
                 </div>
             </aside>
         </div>
     </div>
 
-    <!-- JS -->
-    <script src="/static/js/app.js"></script>
+    <!-- ES Module JS -->
+    <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
