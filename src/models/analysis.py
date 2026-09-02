@@ -9,6 +9,7 @@ from models.audio import AudioTrackPresence
 
 class AnalysisRequirement(str, Enum):
     BLACK_INTERVALS = "black_intervals"
+    FREEZE_INTERVALS = "freeze_intervals"
     SILENCE_INTERVALS = "silence_intervals"
 
 

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -33,6 +33,7 @@ class LiveCycleStats:
     segment_age_seconds_max: float = 0.0
     retry_total: int = 0
     ffmpeg_timeout_total: int = 0
+    profile_metrics: dict[str, int | float] = field(default_factory=dict)
     audio_analysis_total: int = 0
     audio_analysis_failure_total: int = 0
     audio_analysis_timeout_total: int = 0

@@ -166,6 +166,7 @@ def test_running_and_healthy_telemetry_mapped_correctly():
     assert status.telemetry_available is True
     assert status.checks == {
         "black_screen": CheckStatus.ENABLED,
+        "video_freeze": CheckStatus.DISABLED,
         "audio_loss": CheckStatus.DISABLED,
     }
 

@@ -17,7 +17,11 @@ from models.segment import Segment
 from profiles.video_realtime.command_builder import (
     VideoRealtimeCommandBuilder,
 )
-from profiles.video_realtime.parser import BlackdetectParser, VideoFilterParser
+from profiles.video_realtime.parser import (
+    BlackdetectParser,
+    FreezedetectParser,
+    VideoFilterParser,
+)
 
 
 class VideoRealtimeProfile:
@@ -29,6 +33,8 @@ class VideoRealtimeProfile:
         *,
         pix_th: float = 0.10,
         pic_th: float = 0.98,
+        freeze_noise_db: float = -60.0,
+        freeze_detector_minimum_duration: float = 0.2,
         timeout: float = 20.0,
         runner: ProcessRunner | None = None,
         media_input_resolver: MediaInputResolver | None = None,
@@ -40,7 +46,13 @@ class VideoRealtimeProfile:
         configured = tuple(
             parsers
             if parsers is not None
-            else (BlackdetectParser(pix_th=pix_th, pic_th=pic_th),)
+            else (
+                BlackdetectParser(pix_th=pix_th, pic_th=pic_th),
+                FreezedetectParser(
+                    noise_db=freeze_noise_db,
+                    minimum_duration=freeze_detector_minimum_duration,
+                ),
+            )
         )
         if not configured:
             raise ValueError("At least one video filter parser is required")

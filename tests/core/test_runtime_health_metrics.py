@@ -70,6 +70,13 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         backpressure_deferred_work_count=3,
         dropped_work_count=1,
         dropped_capacity_work_count=1,
+        profile_metrics={
+            "video_analysis_total": 9,
+            "video_analysis_failure_total": 2,
+            "video_analysis_timeout_total": 1,
+            "video_freeze_interval_total": 4,
+            "video_freeze_seconds_total": 17.5,
+        },
         audio_analysis_total=7,
         audio_analysis_failure_total=2,
         audio_analysis_timeout_total=1,
@@ -89,6 +96,11 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert mapping["backpressure_deferred_work"] == 3
     assert mapping["dropped_capacity_work"] == 1
     increments = client.client.pipeline_instance.increments
+    assert increments["video_analysis_total"] == 9
+    assert increments["video_analysis_failure_total"] == 2
+    assert increments["video_analysis_timeout_total"] == 1
+    assert increments["video_freeze_interval_total"] == 4
+    assert increments["video_freeze_seconds_total"] == 17.5
     assert increments["audio_analysis_total"] == 7
     assert increments["audio_analysis_failure_total"] == 2
     assert increments["audio_analysis_timeout_total"] == 1

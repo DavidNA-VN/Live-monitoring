@@ -7,6 +7,7 @@ from models.analysis import (
 from models.audio import AudioTrackPresence
 from models.analysis import AnalysisRequirement
 from models.audio import SilenceInterval
+from models.freeze import FreezeInterval
 
 
 def test_metric_collector_drains_async_worker_metrics_per_cycle():
@@ -76,6 +77,43 @@ def test_audio_operational_metrics_distinguish_loss_from_analysis_failure():
     assert snapshot.audio_analysis_timeout_total == 1
     assert snapshot.audio_track_missing_total == 1
     assert snapshot.audio_silence_seconds_total == 1.5
+
+
+def test_video_operational_metrics_distinguish_freeze_from_analysis_failure():
+    collector = RuntimeMetricCollector()
+    collector.record_profile_result(
+        SegmentAnalysisBundle(
+            profile_name="video_realtime",
+            video_realtime=VideoRealtimeAnalysis(
+                checked=True,
+                outputs={
+                    AnalysisRequirement.FREEZE_INTERVALS: (
+                        FreezeInterval(start=0.5, end=2.0),
+                        FreezeInterval(start=3.0, end=4.0),
+                    )
+                },
+            ),
+        )
+    )
+    collector.record_profile_result(
+        SegmentAnalysisBundle(
+            profile_name="video_realtime",
+            video_realtime=VideoRealtimeAnalysis(
+                checked=False,
+                timed_out=True,
+            ),
+        )
+    )
+
+    snapshot = collector.drain()
+
+    assert snapshot.profile_metrics == {
+        "video_analysis_total": 2,
+        "video_analysis_failure_total": 1,
+        "video_analysis_timeout_total": 1,
+        "video_freeze_interval_total": 2,
+        "video_freeze_seconds_total": 2.5,
+    }
 
 
 def test_analysis_bundle_reports_timeout_from_either_media_profile():

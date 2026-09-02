@@ -1,8 +1,8 @@
-import { ApiClient } from './api-client.js';
-import { DashboardView } from './dashboard-view.js';
-import { MediaSession } from './media-session.js';
-import { AlertClient } from './alert-client.js';
-import { LifecycleController } from './lifecycle-controller.js';
+import { ApiClient } from './api-client.js?v=6.0';
+import { DashboardView } from './dashboard-view.js?v=6.0';
+import { MediaSession } from './media-session.js?v=6.0';
+import { AlertClient } from './alert-client.js?v=6.0';
+import { LifecycleController } from './lifecycle-controller.js?v=6.0';
 
 /**
  * App Entrypoint: Khởi tạo các module và gắn kết giao diện điều khiển.
@@ -53,7 +53,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const streamId = view.streamIdInput.value.trim();
             const masterUrl = view.masterUrlInput.value.trim();
             if (streamId && masterUrl) {
-                controller.handleStart(streamId, masterUrl);
+                controller.handleStart(streamId, masterUrl, {
+                    videoFreezeEnabled: (
+                        view.freezeEnabledInput?.checked === true
+                    )
+                });
             }
         });
     }

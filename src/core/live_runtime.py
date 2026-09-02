@@ -235,6 +235,7 @@ class LiveMonitoringRuntime:
         )
         stats.retry_total = worker_metrics.retry_total
         stats.ffmpeg_timeout_total = worker_metrics.ffmpeg_timeout_total
+        stats.profile_metrics = dict(worker_metrics.profile_metrics)
         stats.audio_analysis_total = worker_metrics.audio_analysis_total
         stats.audio_analysis_failure_total = (
             worker_metrics.audio_analysis_failure_total

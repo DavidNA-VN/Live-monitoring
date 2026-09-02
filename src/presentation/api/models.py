@@ -20,10 +20,30 @@ class AudioLossCheck(PresentationDTO):
     duration_seconds: float = Field(..., gt=0)
     track_index: int = Field(default=0, ge=0)
 
+
+class VideoFreezeCheck(PresentationDTO):
+    enabled: bool = False
+    noise_db: float = Field(default=-60.0, le=0)
+    detector_minimum_duration: float = Field(default=0.2, gt=0)
+    warning_duration_seconds: float = Field(default=3.0, gt=0)
+    alert_duration_seconds: float = Field(default=5.0, gt=0)
+
+    @model_validator(mode="after")
+    def validate_threshold_order(self):
+        if self.alert_duration_seconds <= self.warning_duration_seconds:
+            raise ValueError(
+                "alert_duration_seconds must be greater than "
+                "warning_duration_seconds"
+            )
+        return self
+
 # Gom nhóm các kiểm tra (checks)
 class StreamChecks(PresentationDTO):
     black_screen: BlackScreenCheck
     audio_loss: AudioLossCheck
+    video_freeze: VideoFreezeCheck = Field(
+        default_factory=VideoFreezeCheck
+    )
 
 # DTO: Data Transfer Object dùng để nhận request tạo stream mới từ UI
 class StreamConfigDTO(PresentationDTO):
@@ -88,6 +108,8 @@ class EventType(str, Enum):
     BLACK_SCREEN = "BLACK_SCREEN"
     REPEATED_BLACK_SCREEN = "REPEATED_BLACK_SCREEN"
     AUDIO_LOSS = "AUDIO_LOSS"
+    VIDEO_FREEZE = "VIDEO_FREEZE"
+    REPEATED_VIDEO_FREEZE = "REPEATED_VIDEO_FREEZE"
     RUNTIME_HEALTH = "RUNTIME_HEALTH"
 
 # Trạng thái của sự kiện: Bắt đầu (OPEN), Cập nhật (UPDATE), Đã giải quyết (RESOLVED)

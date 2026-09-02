@@ -291,6 +291,8 @@ def test_existing_command_and_alert_enums_unmodified():
         "BLACK_SCREEN",
         "REPEATED_BLACK_SCREEN",
         "AUDIO_LOSS",
+        "VIDEO_FREEZE",
+        "REPEATED_VIDEO_FREEZE",
         "RUNTIME_HEALTH",
     ]
     assert alert_schema["properties"]["state"]["enum"] == [

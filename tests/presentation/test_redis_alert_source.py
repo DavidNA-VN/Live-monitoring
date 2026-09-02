@@ -152,6 +152,38 @@ async def test_recent_single_stream_chronological():
 
 
 @pytest.mark.anyio
+async def test_recent_preserves_freeze_open_update_resolved_lifecycle():
+    fake_redis = FakeAsyncRedisStream()
+    keys = AlertRedisKeys(RedisNamespace("test-monitor"))
+    source = RedisAlertSource(redis_client=fake_redis, keys=keys)
+    lifecycle = []
+    for index, state in enumerate(("OPEN", "UPDATE", "RESOLVED"), start=1):
+        fields = make_alert_fields(
+            "chan-01",
+            f"freeze-{state.lower()}",
+            "freeze-event-1",
+            event_type="VIDEO_FREEZE",
+            state=state,
+            minute=index,
+        )
+        fields["reason"] = (
+            "video_returned" if state == "RESOLVED" else "freeze_threshold"
+        )
+        lifecycle.append((f"{index}-0", fields))
+    fake_redis.streams[keys.outbox()] = lifecycle
+
+    recent = await source.recent("chan-01", limit=10)
+
+    assert [item.state.value for item in recent] == [
+        "OPEN",
+        "UPDATE",
+        "RESOLVED",
+    ]
+    assert {item.event_id for item in recent} == {"freeze-event-1"}
+    assert all(item.event_type is EventType.VIDEO_FREEZE for item in recent)
+
+
+@pytest.mark.anyio
 async def test_recent_multi_stream_filtering_and_limit():
     fake_redis = FakeAsyncRedisStream()
     keys = AlertRedisKeys(RedisNamespace("test-monitor"))

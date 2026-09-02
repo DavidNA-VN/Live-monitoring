@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import Lock
+from types import MappingProxyType
+from collections.abc import Mapping
 
 from models.analysis import AnalysisRequirement, SegmentAnalysisBundle
 from models.audio import AudioTrackPresence, SilenceInterval
+from models.freeze import FreezeInterval
 
 
 @dataclass(frozen=True)
@@ -14,6 +17,7 @@ class AnalysisMetricSnapshot:
     segment_age_seconds_max: float
     retry_total: int
     ffmpeg_timeout_total: int
+    profile_metrics: Mapping[str, int | float]
     audio_analysis_total: int
     audio_analysis_failure_total: int
     audio_analysis_timeout_total: int
@@ -31,6 +35,7 @@ class RuntimeMetricCollector:
         self._segment_age_max = 0.0
         self._retry_total = 0
         self._ffmpeg_timeout_total = 0
+        self._profile_metrics: dict[str, int | float] = {}
         self._audio_analysis_total = 0
         self._audio_analysis_failure_total = 0
         self._audio_analysis_timeout_total = 0
@@ -53,6 +58,32 @@ class RuntimeMetricCollector:
             self._ffmpeg_timeout_total += int(ffmpeg_timed_out)
 
     def record_profile_result(self, analysis: SegmentAnalysisBundle) -> None:
+        video = analysis.video_realtime
+        if video is not None:
+            intervals = video.outputs.get(
+                AnalysisRequirement.FREEZE_INTERVALS, ()
+            )
+            freeze_intervals = tuple(
+                interval
+                for interval in intervals
+                if isinstance(interval, FreezeInterval)
+            ) if isinstance(intervals, tuple) else ()
+            with self._lock:
+                self._increment_profile_metric("video_analysis_total", 1)
+                self._increment_profile_metric(
+                    "video_analysis_failure_total", int(not video.checked)
+                )
+                self._increment_profile_metric(
+                    "video_analysis_timeout_total", int(video.timed_out)
+                )
+                self._increment_profile_metric(
+                    "video_freeze_interval_total", len(freeze_intervals)
+                )
+                self._increment_profile_metric(
+                    "video_freeze_seconds_total",
+                    sum(interval.duration for interval in freeze_intervals),
+                )
+
         audio = analysis.audio_realtime
         if audio is None:
             return
@@ -83,6 +114,7 @@ class RuntimeMetricCollector:
                 segment_age_seconds_max=self._segment_age_max,
                 retry_total=self._retry_total,
                 ffmpeg_timeout_total=self._ffmpeg_timeout_total,
+                profile_metrics=MappingProxyType(dict(self._profile_metrics)),
                 audio_analysis_total=self._audio_analysis_total,
                 audio_analysis_failure_total=(
                     self._audio_analysis_failure_total
@@ -100,9 +132,13 @@ class RuntimeMetricCollector:
             self._segment_age_max = 0.0
             self._retry_total = 0
             self._ffmpeg_timeout_total = 0
+            self._profile_metrics = {}
             self._audio_analysis_total = 0
             self._audio_analysis_failure_total = 0
             self._audio_analysis_timeout_total = 0
             self._audio_track_missing_total = 0
             self._audio_silence_seconds_total = 0.0
             return snapshot
+
+    def _increment_profile_metric(self, name: str, value: int | float) -> None:
+        self._profile_metrics[name] = self._profile_metrics.get(name, 0) + value

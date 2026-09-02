@@ -1,0 +1,1 @@
+"""Video-freeze check domain."""

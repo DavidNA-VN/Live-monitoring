@@ -36,6 +36,7 @@ def main() -> int:
             "-m",
             "pytest",
             "tests/e2e/test_mvp_api_worker_e2e.py",
+            "tests/e2e/test_video_freeze_live_e2e.py",
             "-v",
         ]
     elif mode == "all":
@@ -52,12 +53,16 @@ def main() -> int:
         return pytest_result.returncode
 
     if mode in ("fast", "all"):
+        frontend_tests = [
+            str(path.relative_to(PROJECT_ROOT))
+            for path in sorted((PROJECT_ROOT / "tests" / "frontend").glob("*.mjs"))
+        ]
         frontend_result = subprocess.run(
             [
                 "node",
                 "--experimental-default-type=module",
                 "--test",
-                "tests/frontend/test_lifecycle_controller.mjs",
+                *frontend_tests,
             ],
             env=env,
             cwd=PROJECT_ROOT,

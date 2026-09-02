@@ -37,6 +37,8 @@ def test_alert_contract_matches_current_detection_cases():
         "BLACK_SCREEN",
         "REPEATED_BLACK_SCREEN",
         "AUDIO_LOSS",
+        "VIDEO_FREEZE",
+        "REPEATED_VIDEO_FREEZE",
         "RUNTIME_HEALTH",
     ]
     assert properties["state"]["enum"] == [
@@ -66,6 +68,30 @@ def test_stream_config_exposes_only_public_identity():
     assert set(schema["properties"]["checks"]["properties"]) == {
         "black_screen",
         "audio_loss",
+        "video_freeze",
+    }
+
+
+def test_video_freeze_config_is_optional_with_safe_defaults():
+    schema = load_schema("stream-config.schema.json")
+    checks = schema["properties"]["checks"]
+    freeze = checks["properties"]["video_freeze"]
+
+    assert "video_freeze" not in checks["required"]
+    assert set(freeze["required"]) == {
+        "enabled",
+        "noise_db",
+        "detector_minimum_duration",
+        "warning_duration_seconds",
+        "alert_duration_seconds",
+    }
+    assert freeze["properties"]["noise_db"]["maximum"] == 0
+    assert freeze["default"] == {
+        "enabled": False,
+        "noise_db": -60.0,
+        "detector_minimum_duration": 0.2,
+        "warning_duration_seconds": 3.0,
+        "alert_duration_seconds": 5.0,
     }
 
 

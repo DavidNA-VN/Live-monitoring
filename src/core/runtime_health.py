@@ -177,6 +177,13 @@ class RedisRuntimeHealthReporter:
             for name, value in counters.items():
                 if value:
                     pipeline.hincrby(metrics_key, name, value)
+            for name, value in stats.profile_metrics.items():
+                if not value:
+                    continue
+                if isinstance(value, int):
+                    pipeline.hincrby(metrics_key, name, value)
+                else:
+                    pipeline.hincrbyfloat(metrics_key, name, value)
             if stats.audio_silence_seconds_total:
                 pipeline.hincrbyfloat(
                     metrics_key,

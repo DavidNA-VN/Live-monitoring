@@ -36,7 +36,13 @@ export class ApiClient {
         }
     }
 
-    async startStream(streamId, masterUrl, idempotencyKey = null, signal = null) {
+    async startStream(
+        streamId,
+        masterUrl,
+        idempotencyKey = null,
+        signal = null,
+        options = {}
+    ) {
         const key = idempotencyKey || this.generateIdempotencyKey();
         const payload = {
             schema_version: "1.0",
@@ -49,6 +55,13 @@ export class ApiClient {
                     threshold_dbfs: -60.0,
                     duration_seconds: 30.0,
                     track_index: 0
+                },
+                video_freeze: {
+                    enabled: options.videoFreezeEnabled === true,
+                    noise_db: -60.0,
+                    detector_minimum_duration: 0.2,
+                    warning_duration_seconds: 3.0,
+                    alert_duration_seconds: 5.0
                 }
             }
         };

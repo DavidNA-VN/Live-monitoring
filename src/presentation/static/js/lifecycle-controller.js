@@ -44,12 +44,13 @@ export class LifecycleController {
     }
 
     async _pollStatusUntil(streamId, targetStatus, maxWaitMs = 15000, signal) {
+        const targets = Array.isArray(targetStatus) ? targetStatus : [targetStatus];
         const startTime = Date.now();
         while (Date.now() - startTime < maxWaitMs) {
             if (signal && signal.aborted) return null;
 
             const res = await this.apiClient.getStatus(streamId, signal);
-            if (res.ok && res.data && res.data.status === targetStatus) {
+            if (res.ok && res.data && targets.includes(res.data.status)) {
                 return res.data;
             }
 
@@ -69,7 +70,7 @@ export class LifecycleController {
         return false;
     }
 
-    async handleStart(streamId, masterUrl) {
+    async handleStart(streamId, masterUrl, options = {}) {
         if (!streamId || !masterUrl) return;
 
         // Dọn dẹp session cũ nếu có
@@ -84,7 +85,13 @@ export class LifecycleController {
         this.setState('SUBMITTING_START');
         this.view.addSystemLog(`Đang gửi lệnh Connect tới luồng ${streamId}...`);
 
-        const startRes = await this.apiClient.startStream(streamId, masterUrl, null, signal);
+        const startRes = await this.apiClient.startStream(
+            streamId,
+            masterUrl,
+            null,
+            signal,
+            options
+        );
         if (!startRes.ok) {
             this.setState('FAILED');
             const errDetail = startRes.data?.detail || startRes.error || 'Lỗi không xác định từ Backend';
@@ -124,24 +131,36 @@ export class LifecycleController {
         this.setState('STARTING');
         this.view.addSystemLog(`Lệnh START đã được áp dụng (${cmdResult.status}). Đang đồng bộ trạng thái luồng...`);
 
-        const statusData = await this._pollStatusUntil(streamId, 'RUNNING', 15000, signal);
+        const statusData = await this._pollStatusUntil(streamId, ['RUNNING', 'PAUSED'], 15000, signal);
         if (signal.aborted) return;
 
         if (!statusData) {
             this.setState('FAILED');
-            this.view.addSystemLog("Quá thời gian chờ luồng chuyển sang trạng thái RUNNING", 'warning');
+            this.view.addSystemLog("Quá thời gian chờ đồng bộ trạng thái luồng", 'warning');
             this.view.setSystemStatus('STARTING_TIMEOUT', 'var(--warning)');
             return;
         }
 
-        // Đã xác nhận RUNNING hoàn toàn
-        this.setState('RUNNING');
-        this.view.setSystemStatus('RUNNING', 'var(--success)');
-        this.view.addSystemLog(`Luồng ${streamId} đang hoạt động. Khởi chạy Player & Alert Stream...`);
+        const currentStatus = statusData.status || 'RUNNING';
 
-        this.mediaSession.start(masterUrl);
+        // Khởi động AlertClient và Status Polling trước và độc lập với MediaSession
         this.alertClient.start(streamId);
         this._startStatusPolling(streamId);
+
+        if (currentStatus === 'PAUSED') {
+            this.setState('PAUSED');
+            this.view.setSystemStatus('PAUSED', 'var(--warning)');
+            this.view.addSystemLog(`Luồng ${streamId} hiện đang ở trạng thái PAUSED. Khởi chạy Alert Stream...`);
+        } else {
+            this.setState('RUNNING');
+            this.view.setSystemStatus('RUNNING', 'var(--success)');
+            this.view.addSystemLog(`Luồng ${streamId} đang hoạt động. Khởi chạy Player & Alert Stream...`);
+            try {
+                this.mediaSession.start(masterUrl);
+            } catch (err) {
+                this.view.addSystemLog(`Media player failed to start: ${err?.message || 'Unknown error'}`, 'error');
+            }
+        }
     }
 
     async handlePause() {

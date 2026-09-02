@@ -32,6 +32,47 @@
             "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
             "track_index": {"type": "integer", "minimum": 0, "default": 0}
           }
+        },
+        "video_freeze": {
+          "type": "object",
+          "default": {
+            "enabled": false,
+            "noise_db": -60.0,
+            "detector_minimum_duration": 0.2,
+            "warning_duration_seconds": 3.0,
+            "alert_duration_seconds": 5.0
+          },
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "noise_db",
+            "detector_minimum_duration",
+            "warning_duration_seconds",
+            "alert_duration_seconds"
+          ],
+          "properties": {
+            "enabled": {"type": "boolean", "default": false},
+            "noise_db": {
+              "type": "number",
+              "maximum": 0,
+              "default": -60.0
+            },
+            "detector_minimum_duration": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 0.2
+            },
+            "warning_duration_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 3.0
+            },
+            "alert_duration_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 5.0
+            }
+          }
         }
       }
     }

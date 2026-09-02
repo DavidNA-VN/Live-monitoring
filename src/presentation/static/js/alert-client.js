@@ -27,6 +27,8 @@ export class AlertClient {
         this.reconnectAttempts = 0;
         this.seenAlertIds.clear();
 
+        const token = this.generationToken;
+        this._fetchRecentAlerts(token);
         this._connect();
     }
 

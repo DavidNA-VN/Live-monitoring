@@ -161,8 +161,11 @@ class FakeProcessor:
         outcomes=None,
         *,
         name="black_screen",
+        requirements=None,
     ):
         self.name = name
+        if requirements is not None:
+            self.requirements = frozenset(requirements)
         self.outcomes = outcomes or {}
         self.processed = []
         self.committed = []
@@ -532,7 +535,10 @@ def test_two_checks_share_one_profile_analysis_per_segment(
 ):
     snapshot = make_snapshot([100, 101])
     first = FakeProcessor(name="black_screen")
-    second = FakeProcessor(name="fake_video_check")
+    second = FakeProcessor(
+        name="video_freeze",
+        requirements={AnalysisRequirement.FREEZE_INTERVALS},
+    )
     runner = CountingProcessRunner()
     profile = VideoRealtimeProfile(runner=runner)
     runtime = make_runtime(
@@ -548,6 +554,11 @@ def test_two_checks_share_one_profile_analysis_per_segment(
     assert len(runner.calls) == 2
     assert all(
         call[0][0] == "ffmpeg" for call in runner.calls
+    )
+    assert all(
+        "blackdetect=" in call[0][call[0].index("-vf") + 1]
+        and "freezedetect=" in call[0][call[0].index("-vf") + 1]
+        for call in runner.calls
     )
     assert first.processed == [100, 101]
     assert second.processed == [100, 101]

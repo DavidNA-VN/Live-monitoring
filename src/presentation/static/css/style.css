@@ -32,6 +32,8 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-dark); color
 .url-input-form input:focus { border-color: var(--accent-purple); box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2); background: rgba(0,0,0,0.6); }
 #master-url { flex: 1; }
 .small-input { width: 160px; text-align: center; font-weight: 600; letter-spacing: 0.5px; }
+.check-option { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.check-option input { width: 16px; height: 16px; accent-color: var(--accent-blue); }
 
 /* Status Button/Pill */
 .connection-status { font-size: 0.95rem; font-weight: 600; color: white; display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.4); padding: 8px 18px; border-radius: 20px; border: 1px solid var(--panel-border); letter-spacing: 0.5px; transition: 0.3s; }
@@ -127,7 +129,11 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-dark); color
 /* Badges */
 .badge { font-size: 0.7rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 .badge-open { background: rgba(239, 68, 68, 0.3); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); }
+.badge-update { background: rgba(239, 68, 68, 0.3); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); }
 .badge-resolved { background: rgba(16, 185, 129, 0.3); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.5); }
+.badge-interrupted { background: rgba(245, 158, 11, 0.3); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.5); }
+.badge-warning { background: rgba(245, 158, 11, 0.3); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.5); }
+.badge-alert { background: rgba(239, 68, 68, 0.3); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); }
 .badge-degraded { background: rgba(245, 158, 11, 0.3); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.5); }
 .badge-recovered { background: rgba(20, 184, 166, 0.3); color: #5eead4; border: 1px solid rgba(20, 184, 166, 0.5); }
 .badge-type { background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); }

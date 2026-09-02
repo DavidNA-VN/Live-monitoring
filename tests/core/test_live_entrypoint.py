@@ -35,3 +35,29 @@ def test_live_entrypoint_exposes_audio_monitoring_options():
     assert args.audio_track_index == 2
     assert args.max_media_processes == 3
     assert args.max_service_media_processes == 6
+
+
+def test_live_entrypoint_exposes_opt_in_freeze_options():
+    module = importlib.import_module("live_main")
+
+    args = module.parse_args(
+        [
+            "--url",
+            "https://example.test/master.m3u8",
+            "--enable-video-freeze",
+            "--freeze-noise-db",
+            "-50",
+            "--freeze-detector-minimum-duration",
+            "0.4",
+            "--freeze-warning-duration",
+            "4",
+            "--freeze-alert-duration",
+            "7",
+        ]
+    )
+
+    assert args.enable_video_freeze is True
+    assert args.freeze_noise_db == -50.0
+    assert args.freeze_detector_minimum_duration == 0.4
+    assert args.freeze_warning_duration == 4.0
+    assert args.freeze_alert_duration == 7.0

@@ -20,6 +20,11 @@ def test_stream_config_to_public_serialization():
         silence_threshold_dbfs=-60.0,
         audio_loss_duration=30.0,
         audio_track_index=2,
+        video_freeze_enabled=True,
+        freeze_noise_db=-55.0,
+        freeze_detector_minimum_duration=0.3,
+        freeze_warning_duration=4.0,
+        freeze_alert_duration=6.0,
     )
 
     public_dict = stream_config_to_public(config)
@@ -31,6 +36,13 @@ def test_stream_config_to_public_serialization():
     assert public_dict["checks"]["audio_loss"]["threshold_dbfs"] == -60.0
     assert public_dict["checks"]["audio_loss"]["duration_seconds"] == 30.0
     assert public_dict["checks"]["audio_loss"]["track_index"] == 2
+    assert public_dict["checks"]["video_freeze"] == {
+        "enabled": True,
+        "noise_db": -55.0,
+        "detector_minimum_duration": 0.3,
+        "warning_duration_seconds": 4.0,
+        "alert_duration_seconds": 6.0,
+    }
     assert "storage_id" not in public_dict
 
     # Verify round-trip mapping
@@ -42,3 +54,28 @@ def test_stream_config_to_public_serialization():
     assert reconstructed.silence_threshold_dbfs == config.silence_threshold_dbfs
     assert reconstructed.audio_loss_duration == config.audio_loss_duration
     assert reconstructed.audio_track_index == config.audio_track_index
+    assert reconstructed.video_freeze_enabled is True
+    assert reconstructed.freeze_noise_db == -55.0
+    assert reconstructed.freeze_detector_minimum_duration == 0.3
+    assert reconstructed.freeze_warning_duration == 4.0
+    assert reconstructed.freeze_alert_duration == 6.0
+
+
+def test_legacy_public_config_defaults_freeze_to_disabled():
+    public = {
+        "schema_version": "1.0",
+        "stream_id": "channel-01",
+        "master_url": "https://example.test/master.m3u8",
+        "checks": {
+            "black_screen": {"enabled": True},
+            "audio_loss": {
+                "enabled": True,
+                "threshold_dbfs": -60.0,
+                "duration_seconds": 30.0,
+            },
+        },
+    }
+
+    mapped = stream_config_from_public(public)
+
+    assert mapped.video_freeze_enabled is False

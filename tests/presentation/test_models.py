@@ -20,6 +20,7 @@ from presentation.api.models import (
     StreamConfigDTO,
     StreamHealthEnum,
     StreamStatusEnum,
+    VideoFreezeCheck,
 )
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "contracts"
@@ -44,6 +45,37 @@ def test_stream_config_dto_valid():
     assert data["stream_id"] == "channel-01"
     assert data["checks"]["black_screen"]["enabled"] is True
     assert data["checks"]["audio_loss"]["threshold_dbfs"] == -40.0
+    assert data["checks"]["video_freeze"]["enabled"] is False
+
+
+def test_stream_config_accepts_freeze_and_validates_threshold_order():
+    config = StreamConfigDTO(
+        stream_id="channel-01",
+        master_url="https://example.com/master.m3u8",
+        checks=StreamChecks(
+            black_screen=BlackScreenCheck(enabled=False),
+            audio_loss=AudioLossCheck(
+                enabled=False,
+                threshold_dbfs=-60.0,
+                duration_seconds=30.0,
+            ),
+            video_freeze=VideoFreezeCheck(
+                enabled=True,
+                noise_db=-50.0,
+                detector_minimum_duration=0.4,
+                warning_duration_seconds=4.0,
+                alert_duration_seconds=7.0,
+            ),
+        ),
+    )
+
+    assert config.checks.video_freeze.enabled is True
+    with pytest.raises(ValidationError, match="greater than"):
+        VideoFreezeCheck(
+            enabled=True,
+            warning_duration_seconds=5.0,
+            alert_duration_seconds=5.0,
+        )
 
 
 @pytest.mark.parametrize("url", ["master.m3u8", "file:///tmp/master.m3u8"])

@@ -34,9 +34,11 @@ def main() -> int:
         marker_expr = "worker_e2e and not media_e2e"
     elif mode == "media":
         env["RUN_WORKER_MEDIA_E2E"] = "1"
+        env["REQUIRE_MVP_E2E"] = "1"
         marker_expr = "media_e2e"
     elif mode == "all":
         env["RUN_WORKER_MEDIA_E2E"] = "1"
+        env["REQUIRE_MVP_E2E"] = "1"
         marker_expr = "worker_e2e"
     else:
         raise ValueError(f"Unknown mode: {mode}")

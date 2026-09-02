@@ -27,6 +27,8 @@
         "BLACK_SCREEN",
         "REPEATED_BLACK_SCREEN",
         "AUDIO_LOSS",
+        "VIDEO_FREEZE",
+        "REPEATED_VIDEO_FREEZE",
         "RUNTIME_HEALTH"
       ]
     },

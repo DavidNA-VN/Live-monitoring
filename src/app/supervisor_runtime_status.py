@@ -66,6 +66,11 @@ class SupervisorRuntimeStatusReader:
                 if config.black_screen_enabled
                 else CheckStatus.DISABLED
             ),
+            "video_freeze": (
+                CheckStatus.ENABLED
+                if config.video_freeze_enabled
+                else CheckStatus.DISABLED
+            ),
             "audio_loss": (
                 CheckStatus.ENABLED
                 if config.audio_loss_enabled

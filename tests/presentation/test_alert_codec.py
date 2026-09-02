@@ -112,11 +112,36 @@ def test_5_accept_bytes_fields():
 
 
 def test_6_map_redis_type_to_api_event_type():
-    for event_name in ["BLACK_SCREEN", "REPEATED_BLACK_SCREEN", "AUDIO_LOSS", "RUNTIME_HEALTH"]:
+    for event_name in [
+        "BLACK_SCREEN",
+        "REPEATED_BLACK_SCREEN",
+        "AUDIO_LOSS",
+        "VIDEO_FREEZE",
+        "REPEATED_VIDEO_FREEZE",
+        "RUNTIME_HEALTH",
+    ]:
         fields = valid_alert_fields()
         fields["type"] = event_name
         dto = parse_alert_fields(fields)
         assert dto.event_type.value == event_name
+
+
+def test_parse_video_freeze_update_severity_contract():
+    fields = valid_alert_fields()
+    fields["type"] = "VIDEO_FREEZE"
+    fields["state"] = "UPDATE"
+    fields["check"] = "video_freeze"
+    fields["reason"] = "freeze_alert_threshold"
+    fields["payload"] = json.dumps(
+        {"duration": "5.0", "severity": "ALERT"}
+    )
+    fields["severity"] = "ALERT"
+
+    dto = parse_alert_fields(fields)
+
+    assert dto.event_type is EventType.VIDEO_FREEZE
+    assert dto.state is AlertState.UPDATE
+    assert dto.attributes["severity"] == "ALERT"
 
 
 def test_7_parse_empty_attributes():

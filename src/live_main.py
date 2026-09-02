@@ -35,6 +35,35 @@ def parse_args(argv=None):
         help="Disable audio-loss monitoring",
     )
     parser.add_argument(
+        "--enable-video-freeze",
+        action="store_true",
+        help="Enable video-freeze monitoring",
+    )
+    parser.add_argument(
+        "--freeze-noise-db",
+        type=float,
+        default=-60.0,
+        help="FFmpeg freezedetect noise tolerance in dB",
+    )
+    parser.add_argument(
+        "--freeze-detector-minimum-duration",
+        type=float,
+        default=0.2,
+        help="Minimum FFmpeg freeze candidate duration in seconds",
+    )
+    parser.add_argument(
+        "--freeze-warning-duration",
+        type=float,
+        default=3.0,
+        help="Video-freeze warning duration in seconds",
+    )
+    parser.add_argument(
+        "--freeze-alert-duration",
+        type=float,
+        default=5.0,
+        help="Video-freeze alert duration in seconds",
+    )
+    parser.add_argument(
         "--silence-threshold-dbfs",
         type=float,
         default=-60.0,
@@ -170,6 +199,13 @@ def main():
                     master_url=args.url,
                     stream_id=args.stream_id,
                     black_screen_enabled=not args.disable_black_screen,
+                    video_freeze_enabled=args.enable_video_freeze,
+                    freeze_noise_db=args.freeze_noise_db,
+                    freeze_detector_minimum_duration=(
+                        args.freeze_detector_minimum_duration
+                    ),
+                    freeze_warning_duration=args.freeze_warning_duration,
+                    freeze_alert_duration=args.freeze_alert_duration,
                     audio_loss_enabled=not args.disable_audio_loss,
                     silence_threshold_dbfs=args.silence_threshold_dbfs,
                     audio_loss_duration=args.audio_loss_duration,

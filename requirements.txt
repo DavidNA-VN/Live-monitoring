@@ -9,3 +9,4 @@ m3u8==6.0.0
 pydantic==2.13.4
 redis==8.1.0
 uvicorn==0.52.4
+websockets==17.1

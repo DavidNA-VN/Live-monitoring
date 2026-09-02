@@ -47,14 +47,19 @@ def segment():
     return make_segment(100, duration=6.0)
 
 
-def video_result(profile, segment):
+def video_result(profile, segment, requirements=None):
     return profile.analyze(
-        segment
+        segment,
+        requirements=requirements,
     ).require_video_realtime()
 
 
 def black_intervals(result):
     return result.require_output(AnalysisRequirement.BLACK_INTERVALS, tuple)
+
+
+def freeze_intervals(result):
+    return result.require_output(AnalysisRequirement.FREEZE_INTERVALS, tuple)
 
 
 def test_profile_builds_single_blackdetect_command(segment):
@@ -66,7 +71,11 @@ def test_profile_builds_single_blackdetect_command(segment):
         runner=runner,
     )
 
-    video_result(profile, segment)
+    video_result(
+        profile,
+        segment,
+        frozenset({AnalysisRequirement.BLACK_INTERVALS}),
+    )
 
     call = runner.calls[0]
     command = call["command"]
@@ -81,6 +90,66 @@ def test_profile_builds_single_blackdetect_command(segment):
         "blackdetect=d=0:pix_th=0.1:pic_th=0.98"
         in command
     )
+    assert "freezedetect=" not in command
+
+
+def test_profile_builds_black_and_freeze_filters_in_one_process(segment):
+    runner = FakeProcessRunner(
+        result=FakeProcessResult(
+            stderr="\n".join(
+                (
+                    "black_start:1 black_end:2",
+                    "lavfi.freezedetect.freeze_start: 2.5",
+                    "lavfi.freezedetect.freeze_duration: 2",
+                    "lavfi.freezedetect.freeze_end: 4.5",
+                )
+            )
+        )
+    )
+    profile = VideoRealtimeProfile(runner=runner)
+
+    result = video_result(
+        profile,
+        segment,
+        frozenset(
+            {
+                AnalysisRequirement.BLACK_INTERVALS,
+                AnalysisRequirement.FREEZE_INTERVALS,
+            }
+        ),
+    )
+
+    assert len(runner.calls) == 1
+    command = runner.calls[0]["command"]
+    filter_graph = command[command.index("-vf") + 1]
+    assert filter_graph == (
+        "blackdetect=d=0:pix_th=0.1:pic_th=0.98,"
+        "freezedetect=n=-60dB:d=0.2"
+    )
+    assert [(item.start, item.end) for item in black_intervals(result)] == [
+        (1.0, 2.0)
+    ]
+    assert [(item.start, item.end) for item in freeze_intervals(result)] == [
+        (2.5, 4.5)
+    ]
+
+
+def test_profile_can_request_only_freeze_observation(segment):
+    runner = FakeProcessRunner()
+    profile = VideoRealtimeProfile(runner=runner)
+
+    result = video_result(
+        profile,
+        segment,
+        frozenset({AnalysisRequirement.FREEZE_INTERVALS}),
+    )
+
+    command = runner.calls[0]["command"]
+    filter_graph = command[command.index("-vf") + 1]
+    assert filter_graph == "freezedetect=n=-60dB:d=0.2"
+    assert freeze_intervals(result) == ()
+    with pytest.raises(ValueError, match="black_intervals"):
+        black_intervals(result)
 
 
 def test_command_builder_assembles_filters_into_one_decode_command():

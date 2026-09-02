@@ -70,6 +70,59 @@ def test_audio_only_composition_does_not_create_video_profile():
         components.close()
 
 
+def test_freeze_only_composition_uses_one_video_profile():
+    components = build(
+        config(
+            black_screen_enabled=False,
+            audio_loss_enabled=False,
+            video_freeze_enabled=True,
+        )
+    )
+    try:
+        assert [profile.name for profile in components.profiles] == [
+            "video_realtime"
+        ]
+        assert [processor.name for processor in components.processors] == [
+            "video_freeze"
+        ]
+    finally:
+        components.close()
+
+
+def test_black_and_freeze_share_one_video_profile_and_decode_budget():
+    components = build(
+        config(
+            audio_loss_enabled=False,
+            video_freeze_enabled=True,
+            freeze_noise_db=-50.0,
+            freeze_detector_minimum_duration=0.4,
+            freeze_warning_duration=4.0,
+            freeze_alert_duration=7.0,
+        )
+    )
+    try:
+        assert [profile.name for profile in components.profiles] == [
+            "video_realtime"
+        ]
+        assert [processor.name for processor in components.processors] == [
+            "black_screen",
+            "video_freeze",
+        ]
+        profile = components.profiles[0]
+        freeze_parser = next(
+            parser
+            for parser in profile.parsers
+            if parser.requirement.value == "freeze_intervals"
+        )
+        freeze_processor = components.processors[1]
+        assert freeze_parser.noise_db == -50.0
+        assert freeze_parser.minimum_duration == 0.4
+        assert freeze_processor.event_store.policy.warning_duration == 4.0
+        assert freeze_processor.event_store.policy.alert_duration == 7.0
+    finally:
+        components.close()
+
+
 def test_audio_config_reaches_profile_command_and_policy():
     components = build(
         config(
@@ -93,13 +146,29 @@ def test_audio_config_reaches_profile_command_and_policy():
     ("options", "message"),
     [
         (
-            {"black_screen_enabled": False, "audio_loss_enabled": False},
+            {
+                "black_screen_enabled": False,
+                "video_freeze_enabled": False,
+                "audio_loss_enabled": False,
+            },
             "At least one monitoring check",
         ),
         ({"silence_threshold_dbfs": 0.1}, "silence_threshold_dbfs"),
         ({"silence_threshold_dbfs": float("nan")}, "silence_threshold_dbfs"),
         ({"audio_loss_duration": 0.0}, "audio_loss_duration"),
         ({"audio_track_index": -1}, "audio_track_index"),
+        ({"freeze_noise_db": 0.1}, "freeze_noise_db"),
+        (
+            {"freeze_detector_minimum_duration": 0.0},
+            "freeze_detector_minimum_duration",
+        ),
+        (
+            {
+                "freeze_warning_duration": 5.0,
+                "freeze_alert_duration": 5.0,
+            },
+            "freeze_alert_duration",
+        ),
     ],
 )
 def test_stream_config_rejects_invalid_monitoring_options(options, message):

@@ -9,6 +9,9 @@ from checks.audio_loss.redis_keys import AudioLossRedisKeys
 from checks.black_screen.live_state import RedisBlackEventStore
 from checks.black_screen.processor import BlackScreenSegmentProcessor
 from checks.black_screen.redis_keys import BlackScreenRedisKeys
+from checks.video_freeze.live_state import RedisVideoFreezeEventStore
+from checks.video_freeze.processor import VideoFreezeSegmentProcessor
+from checks.video_freeze.redis_keys import VideoFreezeRedisKeys
 from core.alert_stream import AlertSink
 from core.analysis_profile import AnalysisProfile
 from core.live_runtime import LiveMonitoringRuntime, LiveRuntimeSettings
@@ -27,6 +30,7 @@ from core.stream_session import StreamSession
 from media.input_resolver import HlsMediaInputResolver
 from models.stream_config import StreamConfig
 from policies.audio_loss import AudioLossAlertPolicy
+from policies.video_freeze import VideoFreezeAlertPolicy
 from profiles.audio_realtime import AudioRealtimeProfile
 from profiles.video_realtime import VideoRealtimeProfile
 
@@ -67,6 +71,7 @@ class MonitoringSessionFactory:
         self.runtime_keys = RuntimeRedisKeys(self.namespace)
         self.alert_keys = AlertRedisKeys(self.namespace)
         self.black_keys = BlackScreenRedisKeys(self.namespace)
+        self.freeze_keys = VideoFreezeRedisKeys(self.namespace)
         self.audio_keys = AudioLossRedisKeys(self.namespace)
         self.alert_sink_factory = alert_sink_factory
         self.service_media_process_gate = (
@@ -132,11 +137,17 @@ class MonitoringSessionFactory:
         processors: list[SegmentProcessor] = []
         identity = config.identity
         try:
-            if config.black_screen_enabled:
-                black_profile = VideoRealtimeProfile(
-                    media_input_resolver=self._media_resolver(config)
+            if config.black_screen_enabled or config.video_freeze_enabled:
+                video_profile = VideoRealtimeProfile(
+                    freeze_noise_db=config.freeze_noise_db,
+                    freeze_detector_minimum_duration=(
+                        config.freeze_detector_minimum_duration
+                    ),
+                    media_input_resolver=self._media_resolver(config),
                 )
-                profiles.append(black_profile)
+                profiles.append(video_profile)
+
+            if config.black_screen_enabled:
                 processors.append(
                     BlackScreenSegmentProcessor(
                         event_store=RedisBlackEventStore(
@@ -144,6 +155,30 @@ class MonitoringSessionFactory:
                             external_stream_id=identity.external_stream_id,
                             redis_client=redis_client,
                             black_keys=self.black_keys,
+                            alert_keys=self.alert_keys,
+                            runtime_keys=self.runtime_keys,
+                            alert_stream_max_length=(
+                                config.alert_stream_max_length
+                            ),
+                            alert_sink=alert_sink,
+                        )
+                    )
+                )
+
+            if config.video_freeze_enabled:
+                processors.append(
+                    VideoFreezeSegmentProcessor(
+                        event_store=RedisVideoFreezeEventStore(
+                            storage_id=identity.storage_id,
+                            external_stream_id=identity.external_stream_id,
+                            redis_client=redis_client,
+                            policy=VideoFreezeAlertPolicy(
+                                warning_duration=(
+                                    config.freeze_warning_duration
+                                ),
+                                alert_duration=config.freeze_alert_duration,
+                            ),
+                            freeze_keys=self.freeze_keys,
                             alert_keys=self.alert_keys,
                             runtime_keys=self.runtime_keys,
                             alert_stream_max_length=(

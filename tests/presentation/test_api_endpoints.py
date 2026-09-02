@@ -115,6 +115,7 @@ def test_dashboard_home_endpoint():
         res = client.get("/")
         assert res.status_code == 200
         assert "text/html" in res.headers.get("content-type", "")
+        assert "no-cache" in res.headers["cache-control"]
 
 
 def test_unversioned_prototype_routes_are_not_public():

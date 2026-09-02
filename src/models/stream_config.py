@@ -31,6 +31,11 @@ class StreamConfig:
     media_playlist_workers: int = 4
     alert_stream_max_length: int = 10_000
     black_screen_enabled: bool = True
+    video_freeze_enabled: bool = False
+    freeze_noise_db: float = -60.0
+    freeze_detector_minimum_duration: float = 0.2
+    freeze_warning_duration: float = 3.0
+    freeze_alert_duration: float = 5.0
     audio_loss_enabled: bool = True
     silence_threshold_dbfs: float = -60.0
     audio_loss_duration: float = 30.0
@@ -53,8 +58,31 @@ class StreamConfig:
         for name, value in positive.items():
             if value <= 0:
                 raise ValueError(f"{name} must be > 0")
-        if not self.black_screen_enabled and not self.audio_loss_enabled:
+        if not any(
+            (
+                self.black_screen_enabled,
+                self.video_freeze_enabled,
+                self.audio_loss_enabled,
+            )
+        ):
             raise ValueError("At least one monitoring check must be enabled")
+        freeze_values = {
+            "freeze_detector_minimum_duration": (
+                self.freeze_detector_minimum_duration
+            ),
+            "freeze_warning_duration": self.freeze_warning_duration,
+            "freeze_alert_duration": self.freeze_alert_duration,
+        }
+        if not math.isfinite(self.freeze_noise_db) or self.freeze_noise_db > 0:
+            raise ValueError("freeze_noise_db must be finite and <= 0")
+        for name, value in freeze_values.items():
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and > 0")
+        if self.freeze_alert_duration <= self.freeze_warning_duration:
+            raise ValueError(
+                "freeze_alert_duration must be greater than "
+                "freeze_warning_duration"
+            )
         if (
             not math.isfinite(self.silence_threshold_dbfs)
             or self.silence_threshold_dbfs > 0
