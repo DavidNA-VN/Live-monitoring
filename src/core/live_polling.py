@@ -71,6 +71,7 @@ class InMemoryTimelineGenerationStore:
 class PlaylistObservation:
     snapshot: MediaPlaylistSnapshot
     timeline_generation: int
+    admission_segments: tuple[Segment, ...]
     delta: MediaPlaylistDelta | None = None
 
 
@@ -184,7 +185,33 @@ class PlaylistObservationTracker:
         return PlaylistObservation(
             snapshot=enriched,
             timeline_generation=generation,
+            admission_segments=self._admission_segments(
+                snapshot=enriched,
+                delta=delta,
+            ),
             delta=delta,
+        )
+
+    @staticmethod
+    def _admission_segments(
+        *,
+        snapshot: MediaPlaylistSnapshot,
+        delta: MediaPlaylistDelta | None,
+    ) -> tuple[Segment, ...]:
+        if delta is None or delta.timeline_reset:
+            return tuple(snapshot.segments)
+
+        candidate_sequences = {
+            segment.sequence for segment in delta.new_segments
+        }
+        candidate_sequences.update(
+            replacement.current.sequence
+            for replacement in delta.replaced_segments
+        )
+        return tuple(
+            segment
+            for segment in snapshot.segments
+            if segment.sequence in candidate_sequences
         )
 
     def _enrich_snapshot(

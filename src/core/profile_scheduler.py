@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from threading import Lock
 
 from core.analysis_profile import AnalysisProfile, AnalysisResourceClass
@@ -29,6 +29,7 @@ from models.processing import (
     SegmentProcessingStatus,
 )
 from models.runtime import LiveCycleStats
+from models.segment import Segment
 from models.stream import StreamIdentity
 
 
@@ -152,12 +153,20 @@ class ProfileScheduler:
         snapshot: MediaPlaylistSnapshot,
         stats: LiveCycleStats,
     ) -> None:
-        segments = sorted(snapshot.segments, key=lambda item: item.sequence)
+        self.admit_segments(segments=snapshot.segments, stats=stats)
+
+    def admit_segments(
+        self,
+        *,
+        segments: Iterable[Segment],
+        stats: LiveCycleStats,
+    ) -> None:
+        ordered_segments = sorted(segments, key=lambda item: item.sequence)
         for profile_name, profile in self.profiles.items():
             processors = self.processors_by_profile[profile_name]
             eligible = [
                 segment
-                for segment in segments
+                for segment in ordered_segments
                 if processors
                 and profile.supports_segment(segment)
                 and any(p.supports_segment(segment) for p in processors)

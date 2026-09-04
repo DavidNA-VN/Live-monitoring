@@ -222,8 +222,8 @@ class LiveMonitoringRuntime:
                 snapshot=snapshot,
                 stats=stats,
             )
-            self.profile_scheduler.admit_snapshot(
-                snapshot=observation.snapshot,
+            self.profile_scheduler.admit_segments(
+                segments=observation.admission_segments,
                 stats=stats,
             )
         self.profile_scheduler.dispatch_pending(stats=stats)

@@ -333,11 +333,13 @@ def test_sliding_window_does_not_reprocess_successful_retained_segments(
         FakeStateStore(),
     )
 
-    runtime.run_cycle()
-    runtime.run_cycle()
+    first_stats = runtime.run_cycle()
+    second_stats = runtime.run_cycle()
 
     assert processor.processed == [100, 101, 102, 103]
     assert processor.committed == [100, 101, 102, 103]
+    assert first_stats.admitted_work_count == 3
+    assert second_stats.admitted_work_count == 1
 
 
 def test_new_segment_is_processed_once(monkeypatch):
