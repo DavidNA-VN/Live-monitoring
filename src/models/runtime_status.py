@@ -54,6 +54,7 @@ class RuntimeStatus:
     started_at: datetime | None = None
     last_poll_at: datetime | None = None
     queue_lag_seconds: float | None = None
+    live_edge_lag_seconds: float | None = None
     error: str | None = None
     telemetry_available: bool = True
     health_reasons: tuple[str, ...] = ()
@@ -71,6 +72,13 @@ class RuntimeStatus:
             or self.queue_lag_seconds < 0
         ):
             raise ValueError("queue_lag_seconds must be finite and >= 0")
+        if self.live_edge_lag_seconds is not None and (
+            not math.isfinite(self.live_edge_lag_seconds)
+            or self.live_edge_lag_seconds < 0
+        ):
+            raise ValueError(
+                "live_edge_lag_seconds must be finite and >= 0"
+            )
         if self.worker_id is not None:
             if not isinstance(self.worker_id, str) or not WORKER_ID_REGEX.match(self.worker_id):
                 raise ValueError(f"Invalid worker_id '{self.worker_id}'")
@@ -104,6 +112,7 @@ class RuntimeStatus:
             "active_variant_count": self.active_variant_count,
             "queue_depth": self.queue_depth,
             "queue_lag_seconds": self.queue_lag_seconds,
+            "live_edge_lag_seconds": self.live_edge_lag_seconds,
             "error": self.error,
             "telemetry_available": self.telemetry_available,
             "health_reasons": list(self.health_reasons),

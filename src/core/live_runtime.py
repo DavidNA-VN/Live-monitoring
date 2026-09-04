@@ -14,6 +14,7 @@ from core.live_polling import (
     LivePlaylistPoller,
     PlaylistObservationTracker,
     RedisActiveVariantRegistry,
+    calculate_live_edge_lag,
     calculate_poll_interval,
     calculate_playlist_staleness,
 )
@@ -196,6 +197,7 @@ class LiveMonitoringRuntime:
         stats.playlist_staleness_seconds = calculate_playlist_staleness(
             context
         )
+        stats.live_edge_lag_seconds = calculate_live_edge_lag(context)
         self.variant_registry.refresh(context)
         stats.variant_count = len(context.variants)
         stats.successful_snapshots = len(context.snapshots_by_variant)

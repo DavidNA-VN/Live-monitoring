@@ -67,6 +67,7 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         successful_snapshots=1,
         queue_depth=7,
         queue_lag_seconds=2.5,
+        live_edge_lag_seconds=4.25,
         backpressure_deferred_work_count=3,
         dropped_work_count=1,
         dropped_capacity_work_count=1,
@@ -93,6 +94,7 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     mapping = client.client.pipeline_instance.mapping
     assert mapping["queue_depth"] == 7
     assert mapping["queue_lag_seconds"] == "2.500000"
+    assert mapping["live_edge_lag_seconds"] == "4.250000"
     assert mapping["backpressure_deferred_work"] == 3
     assert mapping["dropped_capacity_work"] == 1
     increments = client.client.pipeline_instance.increments

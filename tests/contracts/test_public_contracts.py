@@ -125,4 +125,6 @@ def test_runtime_status_is_not_coupled_to_internal_redis_keys():
     assert "stream_id" in properties
     assert "health" in properties
     assert "queue_depth" in properties
+    assert "live_edge_lag_seconds" in properties
+    assert "live_edge_lag_seconds" not in schema["required"]
     assert not any("redis" in name for name in properties)

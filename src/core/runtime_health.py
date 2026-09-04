@@ -134,6 +134,11 @@ class RedisRuntimeHealthReporter:
             ),
             "queue_depth": stats.queue_depth,
             "queue_lag_seconds": f"{stats.queue_lag_seconds:.6f}",
+            "live_edge_lag_seconds": (
+                ""
+                if stats.live_edge_lag_seconds is None
+                else f"{stats.live_edge_lag_seconds:.6f}"
+            ),
             "dropped_work": stats.dropped_work_count,
             "dropped_expired_work": (
                 stats.dropped_expired_work_count

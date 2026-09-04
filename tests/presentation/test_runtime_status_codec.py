@@ -20,6 +20,7 @@ def valid_status_payload() -> dict:
         "active_variant_count": 3,
         "queue_depth": 5,
         "queue_lag_seconds": 1.25,
+        "live_edge_lag_seconds": 2.5,
         "error": None,
         "telemetry_available": True,
         "health_reasons": ["All variants healthy"],
@@ -43,6 +44,7 @@ def test_1_parse_full_valid_snapshot():
     assert dto.active_variant_count == 3
     assert dto.queue_depth == 5
     assert dto.queue_lag_seconds == 1.25
+    assert dto.live_edge_lag_seconds == 2.5
     assert dto.telemetry_available is True
     assert dto.worker_id == "worker-node-01"
     assert dto.observed_at == datetime(2026, 8, 28, 10, 0, 5, tzinfo=timezone.utc)
@@ -57,6 +59,7 @@ def test_2_parse_optional_nullable_fields():
     payload["started_at"] = None
     payload["last_poll_at"] = None
     payload["queue_lag_seconds"] = None
+    payload["live_edge_lag_seconds"] = None
     payload["error"] = None
     payload["health_reasons"] = []
 
@@ -64,6 +67,7 @@ def test_2_parse_optional_nullable_fields():
     assert dto.started_at is None
     assert dto.last_poll_at is None
     assert dto.queue_lag_seconds is None
+    assert dto.live_edge_lag_seconds is None
     assert dto.error is None
     assert dto.health_reasons == []
 
@@ -152,6 +156,17 @@ def test_13_reject_non_finite_queue_lag():
         payload["queue_lag_seconds"] = non_finite
         with pytest.raises(RuntimeStatusCodecError, match="must be finite"):
             parse_public_runtime_status(payload, requested_stream_id="chan-01")
+
+
+def test_reject_invalid_live_edge_lag():
+    for invalid in [True, -1.0, float("inf"), float("nan")]:
+        payload = valid_status_payload()
+        payload["live_edge_lag_seconds"] = invalid
+        with pytest.raises(RuntimeStatusCodecError):
+            parse_public_runtime_status(
+                payload,
+                requested_stream_id="chan-01",
+            )
 
 
 def test_14_reject_invalid_check_status():

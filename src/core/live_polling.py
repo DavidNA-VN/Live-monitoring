@@ -288,3 +288,27 @@ def calculate_playlist_staleness(context: MonitoringContext) -> float:
     if latest_end is None:
         return 0.0
     return max(0.0, datetime.now(timezone.utc).timestamp() - latest_end)
+
+
+def calculate_live_edge_lag(
+    context: MonitoringContext,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    """Return the lag of the slowest observable variant live edge."""
+    now_timestamp = (now or datetime.now(timezone.utc)).timestamp()
+    variant_lags: list[float] = []
+
+    for snapshot in context.snapshots_by_variant.values():
+        latest_end = max(
+            (
+                segment.program_date_time.timestamp() + segment.duration
+                for segment in snapshot.segments
+                if segment.program_date_time is not None
+            ),
+            default=None,
+        )
+        if latest_end is not None:
+            variant_lags.append(max(0.0, now_timestamp - latest_end))
+
+    return max(variant_lags) if variant_lags else None

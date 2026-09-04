@@ -95,6 +95,7 @@ class SupervisorRuntimeStatusReader:
                 started_at=snap.started_at,
                 last_poll_at=None,
                 queue_lag_seconds=None,
+                live_edge_lag_seconds=None,
                 error=snap.error,
                 telemetry_available=False,
                 health_reasons=(),
@@ -135,6 +136,7 @@ class SupervisorRuntimeStatusReader:
         active_variant_count = 0
         queue_depth = 0
         queue_lag_seconds = None
+        live_edge_lag_seconds = None
         last_poll_at = None
 
         if telemetry_available:
@@ -187,6 +189,18 @@ class SupervisorRuntimeStatusReader:
                     except (ValueError, TypeError):
                         pass
 
+                live_lag = _get_metric_field("live_edge_lag_seconds")
+                if live_lag is not None:
+                    try:
+                        live_lag_float = float(live_lag)
+                        if (
+                            math.isfinite(live_lag_float)
+                            and live_lag_float >= 0
+                        ):
+                            live_edge_lag_seconds = live_lag_float
+                    except (ValueError, TypeError):
+                        pass
+
                 fin = _get_metric_field("finished_at")
                 if fin is not None:
                     if isinstance(fin, bytes):
@@ -207,6 +221,7 @@ class SupervisorRuntimeStatusReader:
             started_at=snap.started_at,
             last_poll_at=last_poll_at,
             queue_lag_seconds=queue_lag_seconds,
+            live_edge_lag_seconds=live_edge_lag_seconds,
             error=snap.error,
             telemetry_available=telemetry_available,
             health_reasons=health_reasons,

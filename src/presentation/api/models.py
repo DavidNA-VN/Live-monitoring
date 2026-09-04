@@ -183,6 +183,7 @@ class RuntimeStatusDTO(PresentationDTO):
     active_variant_count: int = Field(..., ge=0)
     queue_depth: int = Field(..., ge=0)
     queue_lag_seconds: Optional[float] = Field(None, ge=0)
+    live_edge_lag_seconds: Optional[float] = Field(None, ge=0)
     error: Optional[str] = None
     telemetry_available: bool = False
     health_reasons: List[str] = Field(default_factory=list)

@@ -25,6 +25,7 @@
     "active_variant_count": {"type": "integer", "minimum": 0},
     "queue_depth": {"type": "integer", "minimum": 0},
     "queue_lag_seconds": {"type": ["number", "null"], "minimum": 0},
+    "live_edge_lag_seconds": {"type": ["number", "null"], "minimum": 0},
     "error": {"type": ["string", "null"]},
     "telemetry_available": {"type": "boolean"},
     "health_reasons": {

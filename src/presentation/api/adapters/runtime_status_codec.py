@@ -25,6 +25,7 @@ ALLOWED_KEYS: Set[str] = {
     "active_variant_count",
     "queue_depth",
     "queue_lag_seconds",
+    "live_edge_lag_seconds",
     "error",
     "telemetry_available",
     "health_reasons",
@@ -166,6 +167,21 @@ def parse_public_runtime_status(
             raise RuntimeStatusCodecError(f"Field 'queue_lag_seconds' cannot be negative, got {raw_lag}")
         queue_lag_seconds = float(raw_lag)
 
+    raw_live_lag = data.get("live_edge_lag_seconds")
+    live_edge_lag_seconds: float | None = None
+    if raw_live_lag is not None:
+        if isinstance(raw_live_lag, bool) or not isinstance(
+            raw_live_lag, (int, float)
+        ):
+            raise RuntimeStatusCodecError(
+                "Field 'live_edge_lag_seconds' must be a number"
+            )
+        if not math.isfinite(raw_live_lag) or raw_live_lag < 0:
+            raise RuntimeStatusCodecError(
+                "Field 'live_edge_lag_seconds' must be finite and >= 0"
+            )
+        live_edge_lag_seconds = float(raw_live_lag)
+
     # 9. Validate telemetry_available
     raw_telemetry = data.get("telemetry_available", False)
     if not isinstance(raw_telemetry, bool):
@@ -231,6 +247,7 @@ def parse_public_runtime_status(
             active_variant_count=raw_active_variants,
             queue_depth=raw_queue_depth,
             queue_lag_seconds=queue_lag_seconds,
+            live_edge_lag_seconds=live_edge_lag_seconds,
             error=raw_error,
             telemetry_available=raw_telemetry,
             health_reasons=list(raw_reasons),

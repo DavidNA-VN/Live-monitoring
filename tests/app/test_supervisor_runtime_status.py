@@ -147,6 +147,7 @@ def test_running_and_healthy_telemetry_mapped_correctly():
         "finished_at": "2026-08-26T10:05:00+00:00",
         "queue_depth": "4",
         "queue_lag_seconds": "1.500000",
+        "live_edge_lag_seconds": "3.250000",
     }
     redis.hashes[keys.active_variants(storage_id)] = {"v720": "...", "v1080": "..."}
 
@@ -161,6 +162,7 @@ def test_running_and_healthy_telemetry_mapped_correctly():
     assert status.active_variant_count == 2
     assert status.queue_depth == 4
     assert status.queue_lag_seconds == 1.5
+    assert status.live_edge_lag_seconds == 3.25
     assert status.started_at == datetime(2026, 8, 26, 10, 0, 0, tzinfo=timezone.utc)
     assert status.last_poll_at == datetime(2026, 8, 26, 10, 5, 0, tzinfo=timezone.utc)
     assert status.telemetry_available is True
