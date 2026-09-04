@@ -1,4 +1,5 @@
 from models.runtime import LiveCycleStats
+from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
 from datetime import datetime, timezone
 
 from checks.black_screen.event_reducer import BlackEventReducer
@@ -54,6 +55,54 @@ def test_observation_admits_full_first_snapshot_then_only_new_media():
     ]
 
 
+def test_bounded_startup_selects_newest_segments_and_records_scope():
+    tracker = PlaylistObservationTracker(
+        stream_id="stream-1",
+        admission_policy=LiveAdmissionPolicy(
+            startup_lookback_segments=4
+        ),
+    )
+    cycle_stats = stats()
+
+    result = tracker.observe(
+        snapshot=make_snapshot([100, 101, 102, 103, 104, 105]),
+        stats=cycle_stats,
+    )
+
+    assert [item.sequence for item in result.admission_segments] == [
+        102,
+        103,
+        104,
+        105,
+    ]
+    assert cycle_stats.startup_segments_selected == 4
+    assert cycle_stats.startup_segments_outside_scope == 2
+
+
+def test_full_snapshot_mode_preserves_audit_coverage():
+    tracker = PlaylistObservationTracker(
+        stream_id="stream-1",
+        admission_policy=LiveAdmissionPolicy(
+            startup_mode=StartupAdmissionMode.FULL_SNAPSHOT,
+            startup_lookback_segments=1,
+        ),
+    )
+
+    result = tracker.observe(
+        snapshot=make_snapshot([100, 101, 102, 103, 104, 105]),
+        stats=stats(),
+    )
+
+    assert [item.sequence for item in result.admission_segments] == [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+    ]
+
+
 def test_observation_admits_replacement_with_enriched_revision():
     tracker = PlaylistObservationTracker(stream_id="stream-1")
     first = make_snapshot(
@@ -94,6 +143,30 @@ def test_observation_admits_new_generation_after_timeline_reset():
     assert {
         item.timeline_generation for item in result.admission_segments
     } == {1}
+
+
+def test_timeline_reset_applies_bounded_startup_window():
+    tracker = PlaylistObservationTracker(
+        stream_id="stream-1",
+        admission_policy=LiveAdmissionPolicy(
+            startup_lookback_segments=3
+        ),
+    )
+    tracker.observe(snapshot=make_snapshot([500, 501]), stats=stats())
+    reset_stats = stats()
+
+    result = tracker.observe(
+        snapshot=make_snapshot([100, 101, 102, 103, 104]),
+        stats=reset_stats,
+    )
+
+    assert [item.sequence for item in result.admission_segments] == [
+        102,
+        103,
+        104,
+    ]
+    assert reset_stats.startup_segments_selected == 3
+    assert reset_stats.startup_segments_outside_scope == 2
 
 
 def test_redis_processing_key_separates_generation_and_revision():

@@ -10,6 +10,7 @@ from models.analysis import (
     ResourcePoolLimit,
     default_resource_limits,
 )
+from models.admission import LiveAdmissionPolicy
 from models.stream import StreamIdentity, build_stream_identity
 
 
@@ -29,6 +30,9 @@ class StreamConfig:
     max_work_age_seconds: float = 120.0
     max_segments_per_batch: int = 20
     media_playlist_workers: int = 4
+    admission_policy: LiveAdmissionPolicy = field(
+        default_factory=LiveAdmissionPolicy
+    )
     alert_stream_max_length: int = 10_000
     black_screen_enabled: bool = True
     video_freeze_enabled: bool = False
@@ -114,6 +118,8 @@ class StreamConfig:
             object.__setattr__(
                 self, "request_headers", dict(self.request_headers)
             )
+        if not isinstance(self.admission_policy, LiveAdmissionPolicy):
+            raise TypeError("admission_policy must be a LiveAdmissionPolicy")
 
     @property
     def identity(self) -> StreamIdentity:

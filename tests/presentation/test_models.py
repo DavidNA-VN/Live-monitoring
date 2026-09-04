@@ -46,6 +46,10 @@ def test_stream_config_dto_valid():
     assert data["checks"]["black_screen"]["enabled"] is True
     assert data["checks"]["audio_loss"]["threshold_dbfs"] == -40.0
     assert data["checks"]["video_freeze"]["enabled"] is False
+    assert data["admission"] == {
+        "startup_mode": "bounded_history",
+        "startup_lookback_segments": 4,
+    }
 
 
 def test_stream_config_accepts_freeze_and_validates_threshold_order():

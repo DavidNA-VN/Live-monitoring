@@ -37,6 +37,13 @@ class VideoFreezeCheck(PresentationDTO):
             )
         return self
 
+
+class AdmissionConfig(PresentationDTO):
+    startup_mode: Literal["bounded_history", "full_snapshot"] = (
+        "bounded_history"
+    )
+    startup_lookback_segments: int = Field(default=4, gt=0)
+
 # Gom nhóm các kiểm tra (checks)
 class StreamChecks(PresentationDTO):
     black_screen: BlackScreenCheck
@@ -52,6 +59,7 @@ class StreamConfigDTO(PresentationDTO):
     stream_id: str = Field(..., min_length=1, max_length=128)
     master_url: str = Field(..., min_length=1)
     checks: StreamChecks
+    admission: AdmissionConfig = Field(default_factory=AdmissionConfig)
 
     @field_validator("master_url")
     @classmethod

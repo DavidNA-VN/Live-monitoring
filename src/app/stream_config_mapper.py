@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from models.stream_config import StreamConfig
+from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
 
 
 class StreamConfigMappingError(ValueError):
@@ -16,6 +17,12 @@ def stream_config_to_public(config: StreamConfig) -> dict[str, Any]:
         "schema_version": "1.0",
         "stream_id": config.identity.external_stream_id,
         "master_url": config.master_url,
+        "admission": {
+            "startup_mode": config.admission_policy.startup_mode.value,
+            "startup_lookback_segments": (
+                config.admission_policy.startup_lookback_segments
+            ),
+        },
         "checks": {
             "black_screen": {
                 "enabled": config.black_screen_enabled,
@@ -46,7 +53,13 @@ def stream_config_to_public(config: StreamConfig) -> dict[str, Any]:
 def stream_config_from_public(data: object) -> StreamConfig:
     if not isinstance(data, dict):
         raise StreamConfigMappingError("config must be an object")
-    allowed = {"schema_version", "stream_id", "master_url", "checks"}
+    allowed = {
+        "schema_version",
+        "stream_id",
+        "master_url",
+        "checks",
+        "admission",
+    }
     unknown = set(data) - allowed
     if unknown:
         raise StreamConfigMappingError(
@@ -57,6 +70,13 @@ def stream_config_from_public(data: object) -> StreamConfig:
     stream_id = data.get("stream_id")
     master_url = data.get("master_url")
     checks = data.get("checks")
+    admission = data.get(
+        "admission",
+        {
+            "startup_mode": "bounded_history",
+            "startup_lookback_segments": 4,
+        },
+    )
     if not isinstance(stream_id, str) or not stream_id.strip():
         raise StreamConfigMappingError("config.stream_id must not be empty")
     if not isinstance(master_url, str) or not master_url.strip():
@@ -68,6 +88,26 @@ def stream_config_from_public(data: object) -> StreamConfig:
         )
     if not isinstance(checks, dict):
         raise StreamConfigMappingError("config.checks must be an object")
+    if not isinstance(admission, dict):
+        raise StreamConfigMappingError("config.admission must be an object")
+    admission_fields = {"startup_mode", "startup_lookback_segments"}
+    if set(admission) != admission_fields:
+        raise StreamConfigMappingError("invalid config.admission fields")
+    try:
+        startup_mode = StartupAdmissionMode(admission["startup_mode"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StreamConfigMappingError(
+            "config.admission.startup_mode is invalid"
+        ) from exc
+    startup_lookback = admission["startup_lookback_segments"]
+    if (
+        isinstance(startup_lookback, bool)
+        or not isinstance(startup_lookback, int)
+        or startup_lookback <= 0
+    ):
+        raise StreamConfigMappingError(
+            "config.admission.startup_lookback_segments must be > 0"
+        )
     required_checks = {"black_screen", "audio_loss"}
     unknown_checks = set(checks) - {
         "black_screen",
@@ -165,6 +205,10 @@ def stream_config_from_public(data: object) -> StreamConfig:
             silence_threshold_dbfs=threshold,
             audio_loss_duration=duration,
             audio_track_index=track_index,
+            admission_policy=LiveAdmissionPolicy(
+                startup_mode=startup_mode,
+                startup_lookback_segments=startup_lookback,
+            ),
         )
     except (TypeError, ValueError) as exc:
         raise StreamConfigMappingError(str(exc)) from exc

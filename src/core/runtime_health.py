@@ -129,6 +129,10 @@ class RedisRuntimeHealthReporter:
             "failed_snapshots": stats.failed_snapshots,
             "scheduled_work": stats.scheduled_work_count,
             "admitted_work": stats.admitted_work_count,
+            "startup_segments_selected": stats.startup_segments_selected,
+            "startup_segments_outside_scope": (
+                stats.startup_segments_outside_scope
+            ),
             "backpressure_deferred_work": (
                 stats.backpressure_deferred_work_count
             ),
@@ -170,6 +174,12 @@ class RedisRuntimeHealthReporter:
             )
             metrics_key = self.runtime_keys.metrics(self.storage_id)
             counters = {
+                "startup_segments_selected_total": (
+                    stats.startup_segments_selected
+                ),
+                "startup_segments_outside_scope_total": (
+                    stats.startup_segments_outside_scope
+                ),
                 "audio_analysis_total": stats.audio_analysis_total,
                 "audio_analysis_failure_total": (
                     stats.audio_analysis_failure_total

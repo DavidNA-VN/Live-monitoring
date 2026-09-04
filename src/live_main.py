@@ -8,6 +8,7 @@ from app.monitoring_worker_runner import MonitoringWorkerRunner
 from core.redis_client import RedisClient
 from core.redis_keys import RedisNamespace
 from models.stream_config import StreamConfig
+from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
 from reporting.live_console import LiveAlertConsole
 
 
@@ -106,6 +107,18 @@ def parse_args(argv=None):
         help="Audio analysis executor workers per stream",
     )
     parser.add_argument(
+        "--startup-mode",
+        choices=[mode.value for mode in StartupAdmissionMode],
+        default=StartupAdmissionMode.BOUNDED_HISTORY.value,
+        help="Initial playlist admission policy",
+    )
+    parser.add_argument(
+        "--startup-lookback-segments",
+        type=int,
+        default=4,
+        help="Newest segments admitted per variant at startup/reset",
+    )
+    parser.add_argument(
         "--command-worker",
         action="store_true",
         help="Consume monitoring lifecycle commands from Redis",
@@ -170,6 +183,8 @@ def parse_args(argv=None):
         parser.error("--video-decode-workers must be > 0")
     if args.audio_decode_workers <= 0:
         parser.error("--audio-decode-workers must be > 0")
+    if args.startup_lookback_segments <= 0:
+        parser.error("--startup-lookback-segments must be > 0")
     if args.projection_interval <= 0:
         parser.error("--projection-interval must be > 0")
     if args.heartbeat_interval <= 0:
@@ -238,6 +253,12 @@ def main():
                     audio_loss_duration=args.audio_loss_duration,
                     audio_track_index=args.audio_track_index,
                     max_concurrent_media_processes=args.max_media_processes,
+                    admission_policy=LiveAdmissionPolicy(
+                        startup_mode=StartupAdmissionMode(args.startup_mode),
+                        startup_lookback_segments=(
+                            args.startup_lookback_segments
+                        ),
+                    ),
                 )
             )
             runner.stream_id = result.stream_id

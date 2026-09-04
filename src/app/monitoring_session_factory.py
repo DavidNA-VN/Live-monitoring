@@ -251,6 +251,7 @@ class MonitoringSessionFactory:
             max_segments_per_batch=config.max_segments_per_batch,
             media_playlist_workers=config.media_playlist_workers,
             request_headers=config.request_headers,
+            admission_policy=config.admission_policy,
         )
 
     @staticmethod

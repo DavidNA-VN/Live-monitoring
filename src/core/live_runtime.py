@@ -32,6 +32,7 @@ from models.analysis import (
     ResourcePoolLimit,
     default_resource_limits,
 )
+from models.admission import LiveAdmissionPolicy
 from models.runtime import LiveCycleStats
 from models.stream import StreamIdentity
 from playlist.errors import PlaylistLoadError
@@ -57,6 +58,9 @@ class LiveRuntimeSettings:
     max_segments_per_batch: int = 20
     media_playlist_workers: int = 4
     request_headers: Mapping[str, str] | None = None
+    admission_policy: LiveAdmissionPolicy = field(
+        default_factory=LiveAdmissionPolicy
+    )
 
     def __post_init__(self) -> None:
         positive = {
@@ -90,6 +94,8 @@ class LiveRuntimeSettings:
             raise ValueError(
                 "max_poll_interval must be >= min_poll_interval"
             )
+        if not isinstance(self.admission_policy, LiveAdmissionPolicy):
+            raise TypeError("admission_policy must be a LiveAdmissionPolicy")
 
 
 class LiveMonitoringRuntime:
@@ -124,6 +130,7 @@ class LiveMonitoringRuntime:
             delta_engine,
             stream_id=stream.storage_id,
             generation_store=generation_store,
+            admission_policy=self.settings.admission_policy,
         )
         self.variant_registry = RedisActiveVariantRegistry(
             stream_id=stream.storage_id,

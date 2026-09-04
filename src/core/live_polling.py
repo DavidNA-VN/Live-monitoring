@@ -13,8 +13,10 @@ from core.playlist_delta import PlaylistDeltaEngine
 from core.redis_client import RedisUnavailableError
 from core.redis_keys import RuntimeRedisKeys
 from models.playlist_snapshot import MediaPlaylistSnapshot
+from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
 from models.playlist_delta import MediaPlaylistDelta
 from models.runtime import LiveCycleStats
+from models.segment import Segment
 from models.stream import StreamIdentity
 
 
@@ -105,6 +107,7 @@ class PlaylistObservationTracker:
         *,
         stream_id: str = "local",
         generation_store: TimelineGenerationStore | None = None,
+        admission_policy: LiveAdmissionPolicy | None = None,
     ) -> None:
         self.delta_engine = delta_engine or PlaylistDeltaEngine()
         self.stream_id = stream_id
@@ -113,6 +116,7 @@ class PlaylistObservationTracker:
         )
         self.previous_snapshots: dict[str, MediaPlaylistSnapshot] = {}
         self.generations: dict[str, int] = {}
+        self.admission_policy = admission_policy or LiveAdmissionPolicy()
 
     def observe(
         self,
@@ -188,18 +192,40 @@ class PlaylistObservationTracker:
             admission_segments=self._admission_segments(
                 snapshot=enriched,
                 delta=delta,
+                stats=stats,
             ),
             delta=delta,
         )
 
-    @staticmethod
     def _admission_segments(
+        self,
         *,
         snapshot: MediaPlaylistSnapshot,
         delta: MediaPlaylistDelta | None,
+        stats: LiveCycleStats,
     ) -> tuple[Segment, ...]:
         if delta is None or delta.timeline_reset:
-            return tuple(snapshot.segments)
+            ordered = tuple(
+                sorted(
+                    snapshot.segments,
+                    key=lambda segment: (
+                        segment.discontinuity_sequence,
+                        segment.sequence,
+                    ),
+                )
+            )
+            if (
+                self.admission_policy.startup_mode
+                is StartupAdmissionMode.FULL_SNAPSHOT
+            ):
+                selected = ordered
+            else:
+                selected = ordered[
+                    -self.admission_policy.startup_lookback_segments:
+                ]
+            stats.startup_segments_selected += len(selected)
+            stats.startup_segments_outside_scope += len(ordered) - len(selected)
+            return selected
 
         candidate_sequences = {
             segment.sequence for segment in delta.new_segments

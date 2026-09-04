@@ -60,6 +60,23 @@ def test_live_entrypoint_exposes_resource_pool_tuning_options():
     assert args.audio_decode_workers == 2
 
 
+def test_live_entrypoint_exposes_startup_admission_policy():
+    module = importlib.import_module("live_main")
+
+    args = module.parse_args(
+        [
+            "--command-worker",
+            "--startup-mode",
+            "full_snapshot",
+            "--startup-lookback-segments",
+            "7",
+        ]
+    )
+
+    assert args.startup_mode == "full_snapshot"
+    assert args.startup_lookback_segments == 7
+
+
 def test_live_entrypoint_exposes_opt_in_freeze_options():
     module = importlib.import_module("live_main")
 

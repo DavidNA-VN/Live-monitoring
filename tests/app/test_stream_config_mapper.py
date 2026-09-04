@@ -31,6 +31,10 @@ def test_stream_config_to_public_serialization():
     assert public_dict["schema_version"] == "1.0"
     assert public_dict["stream_id"] == "channel-01"
     assert public_dict["master_url"] == "https://example.test/stream.m3u8"
+    assert public_dict["admission"] == {
+        "startup_mode": "bounded_history",
+        "startup_lookback_segments": 4,
+    }
     assert public_dict["checks"]["black_screen"]["enabled"] is True
     assert public_dict["checks"]["audio_loss"]["enabled"] is True
     assert public_dict["checks"]["audio_loss"]["threshold_dbfs"] == -60.0
@@ -59,6 +63,7 @@ def test_stream_config_to_public_serialization():
     assert reconstructed.freeze_detector_minimum_duration == 0.3
     assert reconstructed.freeze_warning_duration == 4.0
     assert reconstructed.freeze_alert_duration == 6.0
+    assert reconstructed.admission_policy.startup_lookback_segments == 4
 
 
 def test_legacy_public_config_defaults_freeze_to_disabled():
@@ -79,3 +84,5 @@ def test_legacy_public_config_defaults_freeze_to_disabled():
     mapped = stream_config_from_public(public)
 
     assert mapped.video_freeze_enabled is False
+    assert mapped.admission_policy.startup_mode.value == "bounded_history"
+    assert mapped.admission_policy.startup_lookback_segments == 4

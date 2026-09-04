@@ -18,6 +18,8 @@ class LiveCycleStats:
 
     scheduled_work_count: int = 0
     admitted_work_count: int = 0
+    startup_segments_selected: int = 0
+    startup_segments_outside_scope: int = 0
     backpressure_deferred_work_count: int = 0
 
     queue_depth: int = 0

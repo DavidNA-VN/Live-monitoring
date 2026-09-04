@@ -65,6 +65,8 @@ def test_stream_config_exposes_only_public_identity():
 
     assert "stream_id" in schema["properties"]
     assert "storage_id" not in schema["properties"]
+    assert "admission" in schema["properties"]
+    assert "admission" not in schema["required"]
     assert set(schema["properties"]["checks"]["properties"]) == {
         "black_screen",
         "audio_loss",

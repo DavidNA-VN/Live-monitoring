@@ -9,6 +9,24 @@
     "schema_version": {"const": "1.0"},
     "stream_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "master_url": {"type": "string", "format": "uri", "minLength": 1},
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {
+        "startup_mode": "bounded_history",
+        "startup_lookback_segments": 4
+      },
+      "required": ["startup_mode", "startup_lookback_segments"],
+      "properties": {
+        "startup_mode": {
+          "enum": ["bounded_history", "full_snapshot"]
+        },
+        "startup_lookback_segments": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "checks": {
       "type": "object",
       "additionalProperties": false,
