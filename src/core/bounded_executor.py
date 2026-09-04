@@ -79,9 +79,11 @@ class BoundedExecutor:
     def shutdown(
         self,
         wait: bool = True,
+        *,
+        cancel_futures: bool = False,
     ) -> None:
 
         self.executor.shutdown(
             wait=wait,
-            cancel_futures=False,
+            cancel_futures=cancel_futures,
         )

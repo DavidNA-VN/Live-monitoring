@@ -131,8 +131,12 @@ class ProfileScheduler:
             self.processors_by_profile[profile.name].append(processor)
 
     def shutdown(self, *, wait: bool = True) -> None:
+        self.request_stop()
         for executor in self.executors_by_resource.values():
-            executor.shutdown(wait=wait)
+            executor.shutdown(wait=wait, cancel_futures=True)
+
+    def request_stop(self) -> None:
+        self.worker.request_stop()
 
     @property
     def executor(self) -> BoundedExecutor:

@@ -110,9 +110,10 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
 
     # Check EVAL args for health and outbox
     eval_call = client.client.eval_calls[0]
-    # eval_call: (SCRIPT, numkeys, key1(health), key2(outbox), key3(metrics), payload, ttl, state, stream_id, reasons, schema_version, alert_id, event_id, occurred_at, max_len)
+    # The final argument is the canonical alert attributes payload.
     assert eval_call[2] == reporter.runtime_keys.health("storage-1")
     assert eval_call[4] == reporter.runtime_keys.metrics("storage-1")
     assert eval_call[8] == "channel-01"  # ARGV[4] stream_id
     assert eval_call[12] == runtime_health_event_id("storage-1")
     assert "storage-1" not in eval_call[12]
+    assert eval_call[15] == '{"reasons":"backpressure_deferred_work=3,dropped_work=1"}'

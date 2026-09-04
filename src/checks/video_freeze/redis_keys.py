@@ -2,6 +2,8 @@ from core.redis_keys import RedisNamespace
 
 
 class VideoFreezeRedisKeys:
+    check_name = "video_freeze"
+
     def __init__(self, namespace: RedisNamespace | None = None) -> None:
         self.namespace = namespace or RedisNamespace()
 
@@ -11,12 +13,12 @@ class VideoFreezeRedisKeys:
 
     def _variant(self, stream_id: str, variant_stable_id: str) -> str:
         return (
-            f"{self.prefix}:freeze:{stream_id}:"
+            f"{self.prefix}:stream:{stream_id}:check:{self.check_name}:"
             f"variant:{variant_stable_id}"
         )
 
     def open_event(self, stream_id: str, variant_stable_id: str) -> str:
-        return f"{self._variant(stream_id, variant_stable_id)}:open"
+        return f"{self._variant(stream_id, variant_stable_id)}:open-event"
 
     def event(
         self,
@@ -30,7 +32,7 @@ class VideoFreezeRedisKeys:
         )
 
     def event_lock(self, stream_id: str, variant_stable_id: str) -> str:
-        return f"{self._variant(stream_id, variant_stable_id)}:lock"
+        return f"{self._variant(stream_id, variant_stable_id)}:event-lock"
 
     def commit_marker(
         self,
@@ -43,9 +45,9 @@ class VideoFreezeRedisKeys:
     ) -> str:
         return (
             f"{self._variant(stream_id, variant_stable_id)}:"
-            f"generation:{timeline_generation}:"
+            f"timeline:{timeline_generation}:"
             f"disc:{discontinuity_sequence}:segment:{sequence}:"
-            f"revision:{media_revision or 'legacy'}:commit"
+            f"revision:{media_revision or 'legacy'}:event-committed"
         )
 
     def short_history(
@@ -56,7 +58,7 @@ class VideoFreezeRedisKeys:
     ) -> str:
         return (
             f"{self._variant(stream_id, variant_stable_id)}:"
-            f"generation:{timeline_generation}:short-history"
+            f"timeline:{timeline_generation}:short-history"
         )
 
     def short_duration(
@@ -67,7 +69,7 @@ class VideoFreezeRedisKeys:
     ) -> str:
         return (
             f"{self._variant(stream_id, variant_stable_id)}:"
-            f"generation:{timeline_generation}:short-duration"
+            f"timeline:{timeline_generation}:short-duration"
         )
 
     def repeat_incident(
@@ -78,5 +80,5 @@ class VideoFreezeRedisKeys:
     ) -> str:
         return (
             f"{self._variant(stream_id, variant_stable_id)}:"
-            f"generation:{timeline_generation}:repeat-incident"
+            f"timeline:{timeline_generation}:repeat-incident"
         )

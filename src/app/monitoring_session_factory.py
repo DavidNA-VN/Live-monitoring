@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from checks.audio_loss.live_state import RedisAudioLossEventStore
@@ -29,6 +29,7 @@ from core.segment_state import RedisSegmentStateStore
 from core.stream_session import StreamSession
 from media.input_resolver import HlsMediaInputResolver
 from models.stream_config import StreamConfig
+from models.analysis import AnalysisResourceClass, ResourcePoolLimit
 from policies.audio_loss import AudioLossAlertPolicy
 from policies.video_freeze import VideoFreezeAlertPolicy
 from profiles.audio_realtime import AudioRealtimeProfile
@@ -61,10 +62,19 @@ class MonitoringSessionFactory:
         namespace: RedisNamespace | None = None,
         alert_sink_factory: AlertSinkFactory | None = None,
         max_concurrent_media_processes: int = 8,
+        per_stream_media_processes: int | None = None,
+        resource_limits: Mapping[
+            AnalysisResourceClass, ResourcePoolLimit
+        ] | None = None,
         service_media_process_gate: ObservableProcessGate | ProcessGate | None = None,
     ) -> None:
         if max_concurrent_media_processes <= 0:
             raise ValueError("max_concurrent_media_processes must be > 0")
+        if (
+            per_stream_media_processes is not None
+            and per_stream_media_processes <= 0
+        ):
+            raise ValueError("per_stream_media_processes must be > 0")
         self.redis_settings = redis_settings
         self.namespace = namespace or RedisNamespace()
         self.processing_keys = ProcessingRedisKeys(self.namespace)
@@ -74,6 +84,8 @@ class MonitoringSessionFactory:
         self.freeze_keys = VideoFreezeRedisKeys(self.namespace)
         self.audio_keys = AudioLossRedisKeys(self.namespace)
         self.alert_sink_factory = alert_sink_factory
+        self.per_stream_media_processes = per_stream_media_processes
+        self.resource_limits = dict(resource_limits) if resource_limits else None
         self.service_media_process_gate = (
             service_media_process_gate
             or ObservableProcessGate(max_concurrent_media_processes)
@@ -225,13 +237,14 @@ class MonitoringSessionFactory:
             processors=tuple(processors),
         )
 
-    @staticmethod
-    def _runtime_settings(config: StreamConfig) -> LiveRuntimeSettings:
+    def _runtime_settings(self, config: StreamConfig) -> LiveRuntimeSettings:
         return LiveRuntimeSettings(
             playlist_timeout=config.playlist_timeout,
-            resource_limits=config.resource_limits,
+            resource_limits=self.resource_limits or config.resource_limits,
             max_concurrent_media_processes=(
-                config.max_concurrent_media_processes
+                self.per_stream_media_processes
+                if self.per_stream_media_processes is not None
+                else config.max_concurrent_media_processes
             ),
             max_admitted_work=config.max_admitted_work,
             max_work_age_seconds=config.max_work_age_seconds,

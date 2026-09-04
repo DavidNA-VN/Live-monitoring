@@ -37,6 +37,29 @@ def test_live_entrypoint_exposes_audio_monitoring_options():
     assert args.max_service_media_processes == 6
 
 
+def test_live_entrypoint_exposes_resource_pool_tuning_options():
+    module = importlib.import_module("live_main")
+
+    args = module.parse_args(
+        [
+            "--command-worker",
+            "--max-media-processes",
+            "8",
+            "--max-service-media-processes",
+            "8",
+            "--video-decode-workers",
+            "6",
+            "--audio-decode-workers",
+            "2",
+        ]
+    )
+
+    assert args.max_media_processes == 8
+    assert args.max_service_media_processes == 8
+    assert args.video_decode_workers == 6
+    assert args.audio_decode_workers == 2
+
+
 def test_live_entrypoint_exposes_opt_in_freeze_options():
     module = importlib.import_module("live_main")
 

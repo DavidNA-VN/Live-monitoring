@@ -13,6 +13,7 @@ from core.runtime_health import (
 )
 from models.alert import AlertCategory, AlertEnvelope
 from models.runtime import LiveCycleStats
+from presentation.api.adapters.alert_codec import parse_alert_fields
 
 
 pytestmark = pytest.mark.redis_integration
@@ -105,12 +106,16 @@ def test_runtime_health_uses_same_versioned_envelope(redis_context):
         alert_keys.outbox(), count=1
     )[0]
     decoded = AlertEnvelope.from_redis_fields(fields)
+    public_alert = parse_alert_fields(fields)
     assert decoded.category == AlertCategory.RUNTIME
     assert decoded.event_type == "RUNTIME_HEALTH"
     assert decoded.state == "DEGRADED"
     assert decoded.stream_id == "channel-01"
     assert decoded.event_id == runtime_health_event_id("storage-1")
     assert "storage-1" not in decoded.event_id
+    assert public_alert.attributes == {
+        "reasons": "master_playlist_unavailable"
+    }
 
     reporter.publish(
         LiveCycleStats(
@@ -122,6 +127,8 @@ def test_runtime_health_uses_same_versioned_envelope(redis_context):
         alert_keys.outbox(), count=1
     )[0]
     recovered = AlertEnvelope.from_redis_fields(recovered_fields)
+    recovered_public = parse_alert_fields(recovered_fields)
     assert recovered.state == "RECOVERED"
     assert recovered.reason == "runtime_recovered"
     assert recovered.stream_id == "channel-01"
+    assert recovered_public.attributes == {"reasons": ""}

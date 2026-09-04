@@ -50,6 +50,10 @@ class ProfileWorkerCoordinator:
         self.state_store = state_store
         self.metrics = metrics or RuntimeMetricCollector()
         self.media_process_gate = media_process_gate
+        self.stop_event = Event()
+
+    def request_stop(self) -> None:
+        self.stop_event.set()
 
     def process_batch(
         self,
@@ -58,6 +62,8 @@ class ProfileWorkerCoordinator:
     ) -> None:
         blocked_processors: set[str] = set()
         for item in work:
+            if self.stop_event.is_set():
+                return
             try:
                 claimed = self._claim_processors(item, blocked_processors)
             except RedisUnavailableError:

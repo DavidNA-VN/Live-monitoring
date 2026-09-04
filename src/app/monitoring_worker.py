@@ -39,6 +39,11 @@ from core.redis_keys import (
 )
 from core.stream_supervisor import StreamSessionFactory, StreamSupervisor
 from models.runtime_status import WORKER_ID_REGEX
+from models.analysis import (
+    AnalysisResourceClass,
+    ResourcePoolLimit,
+    default_resource_limits,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +60,9 @@ class MonitoringWorkerApplication:
         session_factory: StreamSessionFactory | None = None,
         max_streams: int = 16,
         max_concurrent_media_processes: int = 8,
+        per_stream_media_processes: int = 4,
+        video_decode_workers: int = 4,
+        audio_decode_workers: int = 1,
         consumer_name: str | None = None,
         worker_id: str | None = None,
         worker_version: str = "dev",
@@ -76,10 +84,23 @@ class MonitoringWorkerApplication:
 
         self.media_gate = ObservableProcessGate(max_concurrent_media_processes)
         self.redis_client = RedisClient(redis_settings)
+        resource_limits = default_resource_limits()
+        video_limit = resource_limits[AnalysisResourceClass.VIDEO_DECODE]
+        audio_limit = resource_limits[AnalysisResourceClass.AUDIO_DECODE]
+        resource_limits[AnalysisResourceClass.VIDEO_DECODE] = ResourcePoolLimit(
+            video_decode_workers,
+            video_limit.max_pending_tasks,
+        )
+        resource_limits[AnalysisResourceClass.AUDIO_DECODE] = ResourcePoolLimit(
+            audio_decode_workers,
+            audio_limit.max_pending_tasks,
+        )
         effective_factory = session_factory or MonitoringSessionFactory(
             redis_settings=redis_settings,
             namespace=self.namespace,
             max_concurrent_media_processes=max_concurrent_media_processes,
+            per_stream_media_processes=per_stream_media_processes,
+            resource_limits=resource_limits,
             service_media_process_gate=self.media_gate,
         )
         self.supervisor = StreamSupervisor(

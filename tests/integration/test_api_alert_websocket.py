@@ -189,6 +189,9 @@ def test_tier2_tier3_websocket_fanout_and_disease_types(redis_alert_context):
     with TestClient(app) as client:
         with client.websocket_connect("/api/v1/ws/streams/chan-ws") as ws_a:
             with client.websocket_connect("/api/v1/ws/streams/chan-ws") as ws_b:
+                # TestClient completes the WebSocket handshake before the
+                # subscription coroutine necessarily captures its Redis cursor.
+                time.sleep(0.1)
                 # Both clients connected. Now publish BLACK_SCREEN alert
                 env_black = AlertEnvelope(
                     alert_id="ws-black-01",

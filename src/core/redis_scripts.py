@@ -68,7 +68,7 @@ redis.call(
     'emitted_at', ARGV[9],
     'reason', output_reason,
     'reasons', ARGV[5],
-    'payload', '{}'
+    'payload', ARGV[11]
 )
 redis.call('HINCRBY', KEYS[3], 'alert_total', 1)
 redis.call('HINCRBY', KEYS[3], 'alert_runtime_total', 1)

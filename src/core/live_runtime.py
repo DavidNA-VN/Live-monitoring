@@ -261,3 +261,4 @@ class LiveMonitoringRuntime:
 
     def stop(self) -> None:
         self.stop_event.set()
+        self.profile_scheduler.request_stop()

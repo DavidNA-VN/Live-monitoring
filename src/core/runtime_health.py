@@ -221,6 +221,11 @@ class RedisRuntimeHealthReporter:
             reason=output_reason,
             revision=payload,
         )
+        alert_payload = json.dumps(
+            {"reasons": ",".join(reasons)},
+            separators=(",", ":"),
+            sort_keys=True,
+        )
         try:
             self.redis.eval(
                 PUBLISH_RUNTIME_HEALTH,
@@ -242,6 +247,7 @@ class RedisRuntimeHealthReporter:
                 event_id,
                 datetime.now(timezone.utc).isoformat(),
                 self.stream_max_length,
+                alert_payload,
             )
 
         except redis.RedisError as exc:

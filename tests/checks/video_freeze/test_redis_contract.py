@@ -67,6 +67,6 @@ def test_keyspace_is_freeze_owned_and_full_identity_isolated():
     )
     reset = keys.commit_marker("internal", "v720", 0, 100, 2, "r1")
 
-    assert ":freeze:internal:variant:v720:" in first
+    assert ":stream:internal:check:video_freeze:variant:v720:" in first
     assert len({first, replacement, reset}) == 3
     assert "channel-01" not in first

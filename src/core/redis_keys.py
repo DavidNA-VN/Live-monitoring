@@ -118,7 +118,6 @@ class ControlRedisKeys:
         digest = sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
         return f"{self.prefix}:monitoring:idempotency:{digest}"
 
-
 class PublicRuntimeRedisKeys:
     def __init__(self, namespace: RedisNamespace | None = None) -> None:
         self.namespace = namespace or RedisNamespace()

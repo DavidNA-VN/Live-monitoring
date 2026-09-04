@@ -94,6 +94,18 @@ def parse_args(argv=None):
         help="Service-wide concurrent FFmpeg process budget",
     )
     parser.add_argument(
+        "--video-decode-workers",
+        type=int,
+        default=4,
+        help="Video analysis executor workers per stream",
+    )
+    parser.add_argument(
+        "--audio-decode-workers",
+        type=int,
+        default=1,
+        help="Audio analysis executor workers per stream",
+    )
+    parser.add_argument(
         "--command-worker",
         action="store_true",
         help="Consume monitoring lifecycle commands from Redis",
@@ -146,6 +158,18 @@ def parse_args(argv=None):
         parser.error("one of --url or --command-worker is required")
     if args.max_streams <= 0:
         parser.error("--max-streams must be > 0")
+    if args.max_media_processes <= 0:
+        parser.error("--max-media-processes must be > 0")
+    if args.max_service_media_processes <= 0:
+        parser.error("--max-service-media-processes must be > 0")
+    if args.max_media_processes > args.max_service_media_processes:
+        parser.error(
+            "--max-media-processes must be <= --max-service-media-processes"
+        )
+    if args.video_decode_workers <= 0:
+        parser.error("--video-decode-workers must be > 0")
+    if args.audio_decode_workers <= 0:
+        parser.error("--audio-decode-workers must be > 0")
     if args.projection_interval <= 0:
         parser.error("--projection-interval must be > 0")
     if args.heartbeat_interval <= 0:
@@ -173,6 +197,9 @@ def main():
         namespace=RedisNamespace(args.redis_prefix),
         max_streams=args.max_streams,
         max_concurrent_media_processes=args.max_service_media_processes,
+        per_stream_media_processes=args.max_media_processes,
+        video_decode_workers=args.video_decode_workers,
+        audio_decode_workers=args.audio_decode_workers,
         consumer_name=args.consumer_name,
         worker_id=args.worker_id,
         worker_version=args.worker_version,

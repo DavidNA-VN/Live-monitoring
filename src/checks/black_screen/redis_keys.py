@@ -2,6 +2,8 @@ from core.redis_keys import RedisNamespace
 
 
 class BlackScreenRedisKeys:
+    check_name = "black_screen"
+
     def __init__(self, namespace: RedisNamespace | None = None) -> None:
         self.namespace = namespace or RedisNamespace()
 
@@ -9,11 +11,14 @@ class BlackScreenRedisKeys:
     def prefix(self) -> str:
         return self.namespace.prefix
 
-    def open_event(self, stream_id: str, variant_stable_id: str) -> str:
+    def _variant(self, stream_id: str, variant_stable_id: str) -> str:
         return (
-            f"{self.prefix}:stream:{stream_id}:black:"
-            f"variant:{variant_stable_id}:open"
+            f"{self.prefix}:stream:{stream_id}:check:{self.check_name}:"
+            f"variant:{variant_stable_id}"
         )
+
+    def open_event(self, stream_id: str, variant_stable_id: str) -> str:
+        return f"{self._variant(stream_id, variant_stable_id)}:open-event"
 
     def event(
         self,
@@ -22,15 +27,12 @@ class BlackScreenRedisKeys:
         event_id: str,
     ) -> str:
         return (
-            f"{self.prefix}:stream:{stream_id}:black:"
-            f"variant:{variant_stable_id}:event:{event_id}:details"
+            f"{self._variant(stream_id, variant_stable_id)}:"
+            f"event:{event_id}:details"
         )
 
     def event_lock(self, stream_id: str, variant_stable_id: str) -> str:
-        return (
-            f"{self.prefix}:stream:{stream_id}:black:"
-            f"variant:{variant_stable_id}:event-lock"
-        )
+        return f"{self._variant(stream_id, variant_stable_id)}:event-lock"
 
     def commit_marker(
         self,
@@ -42,8 +44,7 @@ class BlackScreenRedisKeys:
         media_revision: str = "",
     ) -> str:
         return (
-            f"{self.prefix}:stream:{stream_id}:black:"
-            f"variant:{variant_stable_id}:"
+            f"{self._variant(stream_id, variant_stable_id)}:"
             f"timeline:{timeline_generation}:"
             f"disc:{discontinuity_sequence}:"
             f"segment:{sequence}:"
@@ -88,7 +89,6 @@ class BlackScreenRedisKeys:
         suffix: str,
     ) -> str:
         return (
-            f"{self.prefix}:stream:{stream_id}:black:"
-            f"variant:{variant_stable_id}:"
+            f"{self._variant(stream_id, variant_stable_id)}:"
             f"timeline:{timeline_generation}:{suffix}"
         )

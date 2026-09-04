@@ -2,6 +2,7 @@ import pytest
 
 from checks.audio_loss.redis_keys import AudioLossRedisKeys
 from checks.black_screen.redis_keys import BlackScreenRedisKeys
+from checks.video_freeze.redis_keys import VideoFreezeRedisKeys
 from core.redis_keys import (
     AlertRedisKeys,
     ControlRedisKeys,
@@ -26,6 +27,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     control = ControlRedisKeys(namespace)
     black = BlackScreenRedisKeys(namespace)
     audio = AudioLossRedisKeys(namespace)
+    freeze = VideoFreezeRedisKeys(namespace)
 
     assert processing.namespace is namespace
     assert runtime.namespace is namespace
@@ -36,6 +38,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     assert control.namespace is namespace
     assert black.namespace is namespace
     assert audio.namespace is namespace
+    assert freeze.namespace is namespace
     assert not hasattr(processing, "open_event")
     assert not hasattr(runtime, "segment_state")
     assert not hasattr(public_runtime, "health")
@@ -45,6 +48,7 @@ def test_key_spaces_share_prefix_but_keep_domain_ownership():
     assert not hasattr(control, "segment_state")
     assert not hasattr(black, "outbox")
     assert not hasattr(audio, "outbox")
+    assert not hasattr(freeze, "outbox")
 
 
 def test_core_key_schemas_are_stable():
@@ -117,10 +121,11 @@ def test_black_screen_key_schemas_stay_inside_check_package():
     keys = BlackScreenRedisKeys(RedisNamespace("monitor:test"))
 
     assert keys.open_event("stream-1", "v720") == (
-        "monitor:test:stream:stream-1:black:variant:v720:open"
+        "monitor:test:stream:stream-1:check:black_screen:"
+        "variant:v720:open-event"
     )
     assert keys.event("stream-1", "v720", "event-1") == (
-        "monitor:test:stream:stream-1:black:variant:v720:"
+        "monitor:test:stream:stream-1:check:black_screen:variant:v720:"
         "event:event-1:details"
     )
     assert keys.commit_marker(
@@ -131,11 +136,11 @@ def test_black_screen_key_schemas_stay_inside_check_package():
         timeline_generation=2,
         media_revision="revision-1",
     ) == (
-        "monitor:test:stream:stream-1:black:variant:v720:timeline:2:"
+        "monitor:test:stream:stream-1:check:black_screen:variant:v720:timeline:2:"
         "disc:3:segment:100:revision:revision-1:event-committed"
     )
     assert keys.short_history("stream-1", "v720", 2) == (
-        "monitor:test:stream:stream-1:black:variant:v720:"
+        "monitor:test:stream:stream-1:check:black_screen:variant:v720:"
         "timeline:2:short-history"
     )
 
@@ -144,14 +149,16 @@ def test_audio_loss_keys_are_variant_and_timeline_scoped():
     keys = AudioLossRedisKeys(RedisNamespace("monitor:test"))
 
     assert keys.open_event("stream-1", "v720") == (
-        "monitor:test:stream:stream-1:audio-loss:variant:v720:open"
+        "monitor:test:stream:stream-1:check:audio_loss:"
+        "variant:v720:open-event"
     )
     assert keys.event("stream-1", "v720", "event-1") == (
-        "monitor:test:stream:stream-1:audio-loss:variant:v720:"
+        "monitor:test:stream:stream-1:check:audio_loss:variant:v720:"
         "event:event-1:details"
     )
     assert keys.event_lock("stream-1", "v720") == (
-        "monitor:test:stream:stream-1:audio-loss:variant:v720:event-lock"
+        "monitor:test:stream:stream-1:check:audio_loss:"
+        "variant:v720:event-lock"
     )
     assert keys.commit_marker(
         "stream-1",
@@ -161,7 +168,28 @@ def test_audio_loss_keys_are_variant_and_timeline_scoped():
         timeline_generation=2,
         media_revision="revision-1",
     ) == (
-        "monitor:test:stream:stream-1:audio-loss:variant:v720:timeline:2:"
+        "monitor:test:stream:stream-1:check:audio_loss:variant:v720:timeline:2:"
+        "disc:3:segment:100:revision:revision-1:event-committed"
+    )
+
+
+def test_video_freeze_keys_follow_shared_check_schema():
+    keys = VideoFreezeRedisKeys(RedisNamespace("monitor:test"))
+
+    assert keys.open_event("stream-1", "v720") == (
+        "monitor:test:stream:stream-1:check:video_freeze:"
+        "variant:v720:open-event"
+    )
+    assert keys.event("stream-1", "v720", "event-1") == (
+        "monitor:test:stream:stream-1:check:video_freeze:variant:v720:"
+        "event:event-1:details"
+    )
+    assert keys.event_lock("stream-1", "v720") == (
+        "monitor:test:stream:stream-1:check:video_freeze:"
+        "variant:v720:event-lock"
+    )
+    assert keys.commit_marker("stream-1", "v720", 3, 100, 2, "revision-1") == (
+        "monitor:test:stream:stream-1:check:video_freeze:variant:v720:timeline:2:"
         "disc:3:segment:100:revision:revision-1:event-committed"
     )
 

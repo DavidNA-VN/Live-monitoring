@@ -247,16 +247,16 @@ def test_high_event_rate_keeps_freeze_redis_state_bounded(redis_context):
     detail_keys = list(
         client.client.scan_iter(
             match=(
-                f"{keys.namespace.prefix}:freeze:internal-stream:"
-                "variant:stable-720:event:*:details"
+                f"{keys.namespace.prefix}:stream:internal-stream:"
+                "check:video_freeze:variant:stable-720:event:*:details"
             )
         )
     )
     commit_keys = list(
         client.client.scan_iter(
             match=(
-                f"{keys.namespace.prefix}:freeze:internal-stream:"
-                "variant:stable-720:*:commit"
+                f"{keys.namespace.prefix}:stream:internal-stream:"
+                "check:video_freeze:variant:stable-720:*:event-committed"
             )
         )
     )

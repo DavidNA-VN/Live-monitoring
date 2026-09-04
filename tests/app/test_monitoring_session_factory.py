@@ -187,6 +187,37 @@ def test_factory_rejects_invalid_service_media_process_budget():
         MonitoringSessionFactory(max_concurrent_media_processes=0)
 
 
+def test_factory_applies_worker_level_runtime_capacity():
+    from models.analysis import (
+        AnalysisResourceClass,
+        ResourcePoolLimit,
+        default_resource_limits,
+    )
+
+    limits = default_resource_limits()
+    limits[AnalysisResourceClass.VIDEO_DECODE] = ResourcePoolLimit(6, 16)
+    limits[AnalysisResourceClass.AUDIO_DECODE] = ResourcePoolLimit(2, 4)
+    factory = MonitoringSessionFactory(
+        per_stream_media_processes=8,
+        resource_limits=limits,
+    )
+
+    settings = factory._runtime_settings(config())
+
+    assert settings.max_concurrent_media_processes == 8
+    assert settings.resource_limits[AnalysisResourceClass.VIDEO_DECODE] == (
+        ResourcePoolLimit(6, 16)
+    )
+    assert settings.resource_limits[AnalysisResourceClass.AUDIO_DECODE] == (
+        ResourcePoolLimit(2, 4)
+    )
+
+
+def test_factory_rejects_invalid_per_stream_media_process_budget():
+    with pytest.raises(ValueError, match="per_stream_media_processes"):
+        MonitoringSessionFactory(per_stream_media_processes=0)
+
+
 def test_external_audio_is_scheduled_once_as_audio_rendition():
     components = build(config())
     try:
