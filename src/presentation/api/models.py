@@ -43,6 +43,21 @@ class AdmissionConfig(PresentationDTO):
         "bounded_history"
     )
     startup_lookback_segments: int = Field(default=4, gt=0)
+    soft_lag_target_durations: float = Field(default=2.0, gt=0)
+    recovery_lag_target_durations: float = Field(default=1.5, gt=0)
+    transition_cycles: int = Field(default=3, gt=0)
+
+    @model_validator(mode="after")
+    def validate_lag_thresholds(self):
+        if (
+            self.recovery_lag_target_durations
+            >= self.soft_lag_target_durations
+        ):
+            raise ValueError(
+                "recovery_lag_target_durations must be less than "
+                "soft_lag_target_durations"
+            )
+        return self
 
 # Gom nhóm các kiểm tra (checks)
 class StreamChecks(PresentationDTO):

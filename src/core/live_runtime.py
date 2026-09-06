@@ -17,6 +17,7 @@ from core.live_polling import (
     calculate_live_edge_lag,
     calculate_poll_interval,
     calculate_playlist_staleness,
+    minimum_target_duration,
 )
 from core.metrics import RuntimeMetricCollector
 from core.media_process_budget import ProcessGate
@@ -155,6 +156,7 @@ class LiveMonitoringRuntime:
             max_segments_per_batch=self.settings.max_segments_per_batch,
             metrics=self.metrics,
             service_media_process_gate=service_media_process_gate,
+            admission_policy=self.settings.admission_policy,
         )
         self.stop_event = Event()
 
@@ -233,6 +235,10 @@ class LiveMonitoringRuntime:
                 segments=observation.admission_segments,
                 stats=stats,
             )
+        self.profile_scheduler.observe_queue_pressure(
+            target_duration=minimum_target_duration(context),
+            stats=stats,
+        )
         self.profile_scheduler.dispatch_pending(stats=stats)
         worker_metrics = self.metrics.drain()
         stats.analysis_count = worker_metrics.analysis_count

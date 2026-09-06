@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from core.context import MonitoringContext
-from core.live_polling import calculate_live_edge_lag
+from core.live_polling import calculate_live_edge_lag, minimum_target_duration
 from models.playlist_snapshot import MediaPlaylistSnapshot
 from models.segment import Segment
 
@@ -72,3 +72,19 @@ def test_live_edge_lag_clamps_future_media_to_zero() -> None:
     context = _context(_snapshot("variant", segment_end_lag=-1.0))
 
     assert calculate_live_edge_lag(context, now=NOW) == 0.0
+
+
+def test_minimum_target_duration_uses_fastest_playlist_cadence() -> None:
+    fast = _snapshot("fast", segment_end_lag=1.0)
+    slow = _snapshot("slow", segment_end_lag=1.0)
+    fast.target_duration = 2.0
+    slow.target_duration = 6.0
+
+    assert minimum_target_duration(_context(fast, slow)) == 2.0
+
+
+def test_minimum_target_duration_is_unknown_without_valid_targets() -> None:
+    snapshot = _snapshot("variant", segment_end_lag=1.0)
+    snapshot.target_duration = None
+
+    assert minimum_target_duration(_context(snapshot)) is None

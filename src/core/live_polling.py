@@ -330,6 +330,16 @@ def calculate_poll_interval(
     return max(minimum, min(maximum, min(targets) * poll_factor))
 
 
+def minimum_target_duration(context: MonitoringContext) -> float | None:
+    targets = [
+        snapshot.target_duration
+        for snapshot in context.snapshots_by_variant.values()
+        if snapshot.target_duration is not None
+        and snapshot.target_duration > 0
+    ]
+    return min(targets) if targets else None
+
+
 def calculate_playlist_staleness(context: MonitoringContext) -> float:
     latest_end = None
     for snapshot in context.snapshots_by_variant.values():

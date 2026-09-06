@@ -14,6 +14,7 @@ from core.media_process_budget import ProcessGate, process_gate
 from core.segment_admission import (
     AdmissionDrop,
     AdmissionDropReason,
+    AdaptiveAdmissionController,
     AdmissionQueue,
     AdmittedProfileSegment,
     ProfileSegmentIdentity,
@@ -23,6 +24,7 @@ from core.segment_processor import SegmentProcessor
 from core.segment_state import RedisSegmentStateStore
 from models.playlist_snapshot import MediaPlaylistSnapshot
 from models.analysis import ResourcePoolLimit
+from models.admission import LiveAdmissionPolicy
 from models.processing import (
     SegmentProcessingIdentity,
     SegmentProcessingRecord,
@@ -57,6 +59,7 @@ class ProfileScheduler:
         admission_queue: AdmissionQueue | None = None,
         metrics: RuntimeMetricCollector | None = None,
         service_media_process_gate: ProcessGate | None = None,
+        admission_policy: LiveAdmissionPolicy | None = None,
     ) -> None:
         if max_segments_per_batch <= 0:
             raise ValueError("max_segments_per_batch must be > 0")
@@ -95,6 +98,9 @@ class ProfileScheduler:
             max_items=max_admitted_work,
             max_age_seconds=max_work_age_seconds,
         )
+        self.admission_controller = AdaptiveAdmissionController(
+            admission_policy or LiveAdmissionPolicy()
+        )
         self.max_segments_per_batch = max_segments_per_batch
         self.media_process_gate = process_gate(
             per_stream_limit=max_concurrent_media_processes,
@@ -108,6 +114,39 @@ class ProfileScheduler:
         self.batch_lock = Lock()
         self.active_batches: set[tuple[str, str]] = set()
         self.dispatch_cursor = 0
+
+    def observe_queue_pressure(
+        self,
+        *,
+        target_duration: float | None,
+        stats: LiveCycleStats,
+    ) -> None:
+        queue_lag = self.admission_queue.oldest_age_seconds
+        transition = self.admission_controller.observe(
+            queue_lag_seconds=queue_lag,
+            target_duration=target_duration,
+        )
+        stats.admission_mode = self.admission_controller.mode.value
+        if transition is None:
+            return
+        stats.admission_mode_transition_count += 1
+        logger.info(
+            "Admission mode changed stream=%s previous=%s current=%s "
+            "queue_lag=%.3f target_duration=%.3f",
+            self.stream.external_stream_id,
+            transition.previous.value,
+            transition.current.value,
+            transition.queue_lag_seconds,
+            transition.target_duration,
+            extra={
+                "event_name": "admission_mode_changed",
+                "stream_id": self.stream.external_stream_id,
+                "previous_mode": transition.previous.value,
+                "current_mode": transition.current.value,
+                "queue_lag_seconds": transition.queue_lag_seconds,
+                "target_duration": transition.target_duration,
+            },
+        )
 
     def _register_processors(self, processors: list[SegmentProcessor]) -> None:
         names: set[str] = set()
@@ -180,6 +219,7 @@ class ProfileScheduler:
         self._record_queue_metrics(stats)
 
     def dispatch_pending(self, *, stats: LiveCycleStats) -> None:
+        stats.admission_mode = self.admission_controller.mode.value
         self._record_drops(stats, self.admission_queue.expire())
         groups: dict[tuple[str, str], list[AdmittedProfileSegment]] = {}
         for item in self.admission_queue.snapshot():

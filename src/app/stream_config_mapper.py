@@ -22,6 +22,13 @@ def stream_config_to_public(config: StreamConfig) -> dict[str, Any]:
             "startup_lookback_segments": (
                 config.admission_policy.startup_lookback_segments
             ),
+            "soft_lag_target_durations": (
+                config.admission_policy.soft_lag_target_durations
+            ),
+            "recovery_lag_target_durations": (
+                config.admission_policy.recovery_lag_target_durations
+            ),
+            "transition_cycles": config.admission_policy.transition_cycles,
         },
         "checks": {
             "black_screen": {
@@ -75,6 +82,9 @@ def stream_config_from_public(data: object) -> StreamConfig:
         {
             "startup_mode": "bounded_history",
             "startup_lookback_segments": 4,
+            "soft_lag_target_durations": 2.0,
+            "recovery_lag_target_durations": 1.5,
+            "transition_cycles": 3,
         },
     )
     if not isinstance(stream_id, str) or not stream_id.strip():
@@ -90,8 +100,21 @@ def stream_config_from_public(data: object) -> StreamConfig:
         raise StreamConfigMappingError("config.checks must be an object")
     if not isinstance(admission, dict):
         raise StreamConfigMappingError("config.admission must be an object")
-    admission_fields = {"startup_mode", "startup_lookback_segments"}
-    if set(admission) != admission_fields:
+    required_admission_fields = {
+        "startup_mode",
+        "startup_lookback_segments",
+    }
+    optional_admission_fields = {
+        "soft_lag_target_durations",
+        "recovery_lag_target_durations",
+        "transition_cycles",
+    }
+    if (
+        not required_admission_fields.issubset(admission)
+        or set(admission)
+        - required_admission_fields
+        - optional_admission_fields
+    ):
         raise StreamConfigMappingError("invalid config.admission fields")
     try:
         startup_mode = StartupAdmissionMode(admission["startup_mode"])
@@ -107,6 +130,23 @@ def stream_config_from_public(data: object) -> StreamConfig:
     ):
         raise StreamConfigMappingError(
             "config.admission.startup_lookback_segments must be > 0"
+        )
+    soft_lag = _positive_finite_config_number(
+        admission.get("soft_lag_target_durations", 2.0),
+        "config.admission.soft_lag_target_durations",
+    )
+    recovery_lag = _positive_finite_config_number(
+        admission.get("recovery_lag_target_durations", 1.5),
+        "config.admission.recovery_lag_target_durations",
+    )
+    transition_cycles = admission.get("transition_cycles", 3)
+    if (
+        isinstance(transition_cycles, bool)
+        or not isinstance(transition_cycles, int)
+        or transition_cycles <= 0
+    ):
+        raise StreamConfigMappingError(
+            "config.admission.transition_cycles must be > 0"
         )
     required_checks = {"black_screen", "audio_loss"}
     unknown_checks = set(checks) - {
@@ -208,6 +248,9 @@ def stream_config_from_public(data: object) -> StreamConfig:
             admission_policy=LiveAdmissionPolicy(
                 startup_mode=startup_mode,
                 startup_lookback_segments=startup_lookback,
+                soft_lag_target_durations=soft_lag,
+                recovery_lag_target_durations=recovery_lag,
+                transition_cycles=transition_cycles,
             ),
         )
     except (TypeError, ValueError) as exc:
@@ -264,4 +307,13 @@ def _finite_number(
         raise StreamConfigMappingError(
             f"{check}.{field} must be > {exclusive_minimum}"
         )
+    return result
+
+
+def _positive_finite_config_number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise StreamConfigMappingError(f"{field} must be a number")
+    result = float(value)
+    if not math.isfinite(result) or result <= 0:
+        raise StreamConfigMappingError(f"{field} must be finite and > 0")
     return result

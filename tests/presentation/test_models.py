@@ -49,6 +49,9 @@ def test_stream_config_dto_valid():
     assert data["admission"] == {
         "startup_mode": "bounded_history",
         "startup_lookback_segments": 4,
+        "soft_lag_target_durations": 2.0,
+        "recovery_lag_target_durations": 1.5,
+        "transition_cycles": 3,
     }
 
 

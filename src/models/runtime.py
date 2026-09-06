@@ -25,6 +25,8 @@ class LiveCycleStats:
     queue_depth: int = 0
     queue_lag_seconds: float = 0.0
     live_edge_lag_seconds: float | None = None
+    admission_mode: str = "coverage"
+    admission_mode_transition_count: int = 0
     dropped_work_count: int = 0
     dropped_expired_work_count: int = 0
     dropped_capacity_work_count: int = 0

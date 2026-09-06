@@ -143,6 +143,10 @@ class RedisRuntimeHealthReporter:
                 if stats.live_edge_lag_seconds is None
                 else f"{stats.live_edge_lag_seconds:.6f}"
             ),
+            "admission_mode": stats.admission_mode,
+            "admission_mode_transitions": (
+                stats.admission_mode_transition_count
+            ),
             "dropped_work": stats.dropped_work_count,
             "dropped_expired_work": (
                 stats.dropped_expired_work_count
@@ -174,6 +178,9 @@ class RedisRuntimeHealthReporter:
             )
             metrics_key = self.runtime_keys.metrics(self.storage_id)
             counters = {
+                "admission_mode_transitions_total": (
+                    stats.admission_mode_transition_count
+                ),
                 "startup_segments_selected_total": (
                     stats.startup_segments_selected
                 ),

@@ -24,6 +24,21 @@
         "startup_lookback_segments": {
           "type": "integer",
           "minimum": 1
+        },
+        "soft_lag_target_durations": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 2.0
+        },
+        "recovery_lag_target_durations": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1.5
+        },
+        "transition_cycles": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
         }
       }
     },

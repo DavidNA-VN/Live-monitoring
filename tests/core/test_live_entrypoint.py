@@ -70,11 +70,20 @@ def test_live_entrypoint_exposes_startup_admission_policy():
             "full_snapshot",
             "--startup-lookback-segments",
             "7",
+            "--catch-up-soft-lag-segments",
+            "3",
+            "--catch-up-recovery-lag-segments",
+            "1",
+            "--catch-up-transition-cycles",
+            "4",
         ]
     )
 
     assert args.startup_mode == "full_snapshot"
     assert args.startup_lookback_segments == 7
+    assert args.catch_up_soft_lag_segments == 3.0
+    assert args.catch_up_recovery_lag_segments == 1.0
+    assert args.catch_up_transition_cycles == 4
 
 
 def test_live_entrypoint_exposes_opt_in_freeze_options():

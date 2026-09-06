@@ -67,6 +67,11 @@ def test_stream_config_exposes_only_public_identity():
     assert "storage_id" not in schema["properties"]
     assert "admission" in schema["properties"]
     assert "admission" not in schema["required"]
+    admission = schema["properties"]["admission"]
+    assert "soft_lag_target_durations" in admission["properties"]
+    assert "recovery_lag_target_durations" in admission["properties"]
+    assert "transition_cycles" in admission["properties"]
+    assert "soft_lag_target_durations" not in admission["required"]
     assert set(schema["properties"]["checks"]["properties"]) == {
         "black_screen",
         "audio_loss",

@@ -1,6 +1,6 @@
 import pytest
 
-from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
+from models.admission import AdmissionMode, LiveAdmissionPolicy, StartupAdmissionMode
 
 
 def test_admission_policy_has_production_safe_defaults() -> None:
@@ -8,6 +8,9 @@ def test_admission_policy_has_production_safe_defaults() -> None:
 
     assert policy.startup_mode is StartupAdmissionMode.BOUNDED_HISTORY
     assert policy.startup_lookback_segments == 4
+    assert policy.soft_lag_target_durations == 2.0
+    assert policy.recovery_lag_target_durations == 1.5
+    assert policy.transition_cycles == 3
 
 
 def test_admission_policy_normalizes_mode_string() -> None:
@@ -20,3 +23,16 @@ def test_admission_policy_normalizes_mode_string() -> None:
 def test_admission_policy_rejects_non_positive_lookback(lookback: int) -> None:
     with pytest.raises(ValueError, match="startup_lookback_segments"):
         LiveAdmissionPolicy(startup_lookback_segments=lookback)
+
+
+def test_admission_modes_are_stable_contract_values() -> None:
+    assert AdmissionMode.COVERAGE.value == "coverage"
+    assert AdmissionMode.CATCH_UP.value == "catch_up"
+
+
+def test_admission_policy_rejects_invalid_hysteresis() -> None:
+    with pytest.raises(ValueError, match="must be less"):
+        LiveAdmissionPolicy(
+            soft_lag_target_durations=2.0,
+            recovery_lag_target_durations=2.0,
+        )

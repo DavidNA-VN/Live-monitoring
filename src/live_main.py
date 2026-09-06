@@ -119,6 +119,24 @@ def parse_args(argv=None):
         help="Newest segments admitted per variant at startup/reset",
     )
     parser.add_argument(
+        "--catch-up-soft-lag-segments",
+        type=float,
+        default=2.0,
+        help="Queue lag in target durations before catch-up mode",
+    )
+    parser.add_argument(
+        "--catch-up-recovery-lag-segments",
+        type=float,
+        default=1.5,
+        help="Queue lag in target durations before coverage recovery",
+    )
+    parser.add_argument(
+        "--catch-up-transition-cycles",
+        type=int,
+        default=3,
+        help="Consecutive cycles required for admission mode changes",
+    )
+    parser.add_argument(
         "--command-worker",
         action="store_true",
         help="Consume monitoring lifecycle commands from Redis",
@@ -185,6 +203,20 @@ def parse_args(argv=None):
         parser.error("--audio-decode-workers must be > 0")
     if args.startup_lookback_segments <= 0:
         parser.error("--startup-lookback-segments must be > 0")
+    if args.catch_up_soft_lag_segments <= 0:
+        parser.error("--catch-up-soft-lag-segments must be > 0")
+    if args.catch_up_recovery_lag_segments <= 0:
+        parser.error("--catch-up-recovery-lag-segments must be > 0")
+    if (
+        args.catch_up_recovery_lag_segments
+        >= args.catch_up_soft_lag_segments
+    ):
+        parser.error(
+            "--catch-up-recovery-lag-segments must be less than "
+            "--catch-up-soft-lag-segments"
+        )
+    if args.catch_up_transition_cycles <= 0:
+        parser.error("--catch-up-transition-cycles must be > 0")
     if args.projection_interval <= 0:
         parser.error("--projection-interval must be > 0")
     if args.heartbeat_interval <= 0:
@@ -258,6 +290,13 @@ def main():
                         startup_lookback_segments=(
                             args.startup_lookback_segments
                         ),
+                        soft_lag_target_durations=(
+                            args.catch_up_soft_lag_segments
+                        ),
+                        recovery_lag_target_durations=(
+                            args.catch_up_recovery_lag_segments
+                        ),
+                        transition_cycles=args.catch_up_transition_cycles,
                     ),
                 )
             )

@@ -8,6 +8,92 @@ from time import monotonic
 from typing import Callable, Iterable, Protocol
 
 from models.segment import Segment
+from models.admission import AdmissionMode, LiveAdmissionPolicy
+
+
+@dataclass(frozen=True)
+class AdmissionModeTransition:
+    previous: AdmissionMode
+    current: AdmissionMode
+    queue_lag_seconds: float
+    target_duration: float
+
+
+class AdaptiveAdmissionController:
+    """Tracks catch-up pressure without changing temporal work order."""
+
+    def __init__(self, policy: LiveAdmissionPolicy) -> None:
+        self.policy = policy
+        self.mode = AdmissionMode.COVERAGE
+        self._over_soft_cycles = 0
+        self._under_recovery_cycles = 0
+
+    def observe(
+        self,
+        *,
+        queue_lag_seconds: float,
+        target_duration: float | None,
+    ) -> AdmissionModeTransition | None:
+        if target_duration is None or target_duration <= 0:
+            self._reset_evidence()
+            return None
+
+        soft_limit = (
+            target_duration * self.policy.soft_lag_target_durations
+        )
+        recovery_limit = (
+            target_duration * self.policy.recovery_lag_target_durations
+        )
+
+        if self.mode is AdmissionMode.COVERAGE:
+            self._under_recovery_cycles = 0
+            self._over_soft_cycles = (
+                self._over_soft_cycles + 1
+                if queue_lag_seconds > soft_limit
+                else 0
+            )
+            if self._over_soft_cycles < self.policy.transition_cycles:
+                return None
+            return self._transition(
+                AdmissionMode.CATCH_UP,
+                queue_lag_seconds=queue_lag_seconds,
+                target_duration=target_duration,
+            )
+
+        self._over_soft_cycles = 0
+        self._under_recovery_cycles = (
+            self._under_recovery_cycles + 1
+            if queue_lag_seconds < recovery_limit
+            else 0
+        )
+        if self._under_recovery_cycles < self.policy.transition_cycles:
+            return None
+        return self._transition(
+            AdmissionMode.COVERAGE,
+            queue_lag_seconds=queue_lag_seconds,
+            target_duration=target_duration,
+        )
+
+    def _transition(
+        self,
+        mode: AdmissionMode,
+        *,
+        queue_lag_seconds: float,
+        target_duration: float,
+    ) -> AdmissionModeTransition:
+        previous = self.mode
+        self.mode = mode
+        self._reset_evidence()
+        return AdmissionModeTransition(
+            previous=previous,
+            current=mode,
+            queue_lag_seconds=queue_lag_seconds,
+            target_duration=target_duration,
+        )
+
+    def _reset_evidence(self) -> None:
+        self._over_soft_cycles = 0
+        self._under_recovery_cycles = 0
 
 
 @dataclass(frozen=True)

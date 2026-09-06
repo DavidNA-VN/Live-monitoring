@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from threading import BoundedSemaphore, Lock
 from time import sleep
 
@@ -10,7 +11,9 @@ from core.analysis_profile import AnalysisResourceClass
 from core.segment_admission import (
     AdmittedProfileSegment,
     ProfileSegmentIdentity,
+    SegmentAdmissionQueue,
 )
+from models.admission import AdmissionMode, LiveAdmissionPolicy
 from models.analysis import (
     AnalysisRequirement,
     AudioRealtimeAnalysis,
@@ -21,6 +24,7 @@ from models.analysis import (
 )
 from models.audio import AudioTrackPresence
 from models.stream import StreamIdentity, build_stream_identity
+from models.runtime import LiveCycleStats
 from tests.factories.hls import make_segment
 
 
@@ -179,6 +183,96 @@ def test_profile_scheduler_builds_processing_identity_with_storage_id():
         assert proc_identity.sequence == 10
     finally:
         scheduler.shutdown()
+
+
+def test_scheduler_enters_catch_up_from_observed_queue_pressure():
+    now = [0.0]
+    queue = SegmentAdmissionQueue(
+        max_items=10,
+        max_age_seconds=100,
+        clock=lambda: now[0],
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(10)],
+    )
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[FakeProfile()],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+        admission_queue=queue,
+        admission_policy=LiveAdmissionPolicy(transition_cycles=3),
+    )
+    now[0] = 5.0
+    try:
+        for _ in range(2):
+            stats = LiveCycleStats(started_at=datetime.now(timezone.utc))
+            scheduler.observe_queue_pressure(
+                target_duration=2.0,
+                stats=stats,
+            )
+            assert stats.admission_mode == "coverage"
+
+        stats = LiveCycleStats(started_at=datetime.now(timezone.utc))
+        scheduler.observe_queue_pressure(
+            target_duration=2.0,
+            stats=stats,
+        )
+
+        assert scheduler.admission_controller.mode is AdmissionMode.CATCH_UP
+        assert stats.admission_mode == "catch_up"
+        assert stats.admission_mode_transition_count == 1
+    finally:
+        scheduler.shutdown()
+
+
+def test_dispatch_round_robin_prevents_variant_group_starvation(monkeypatch):
+    queue = SegmentAdmissionQueue(max_items=10, max_age_seconds=100)
+    first = make_segment(10)
+    first.variant_stable_id = "variant-a"
+    second = make_segment(10)
+    second.variant_stable_id = "variant-b"
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[first, second],
+    )
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[FakeProfile()],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+        admission_queue=queue,
+    )
+    observed: list[str] = []
+
+    def record_group(**kwargs):
+        observed.append(kwargs["variant_stable_id"])
+
+    monkeypatch.setattr(scheduler, "_plan_group", record_group)
+    try:
+        stats = LiveCycleStats(started_at=datetime.now(timezone.utc))
+        scheduler.dispatch_pending(stats=stats)
+        scheduler.dispatch_pending(stats=stats)
+    finally:
+        scheduler.shutdown()
+
+    assert observed == [
+        "variant-a",
+        "variant-b",
+        "variant-b",
+        "variant-a",
+    ]
 
 
 def test_global_media_process_gate_caps_cross_pool_analysis():

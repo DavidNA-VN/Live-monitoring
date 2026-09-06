@@ -34,6 +34,9 @@ def test_stream_config_to_public_serialization():
     assert public_dict["admission"] == {
         "startup_mode": "bounded_history",
         "startup_lookback_segments": 4,
+        "soft_lag_target_durations": 2.0,
+        "recovery_lag_target_durations": 1.5,
+        "transition_cycles": 3,
     }
     assert public_dict["checks"]["black_screen"]["enabled"] is True
     assert public_dict["checks"]["audio_loss"]["enabled"] is True
@@ -64,6 +67,9 @@ def test_stream_config_to_public_serialization():
     assert reconstructed.freeze_warning_duration == 4.0
     assert reconstructed.freeze_alert_duration == 6.0
     assert reconstructed.admission_policy.startup_lookback_segments == 4
+    assert reconstructed.admission_policy.soft_lag_target_durations == 2.0
+    assert reconstructed.admission_policy.recovery_lag_target_durations == 1.5
+    assert reconstructed.admission_policy.transition_cycles == 3
 
 
 def test_legacy_public_config_defaults_freeze_to_disabled():

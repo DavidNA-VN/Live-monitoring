@@ -70,6 +70,8 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         live_edge_lag_seconds=4.25,
         startup_segments_selected=4,
         startup_segments_outside_scope=2,
+        admission_mode="catch_up",
+        admission_mode_transition_count=1,
         backpressure_deferred_work_count=3,
         dropped_work_count=1,
         dropped_capacity_work_count=1,
@@ -99,12 +101,15 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert mapping["live_edge_lag_seconds"] == "4.250000"
     assert mapping["startup_segments_selected"] == 4
     assert mapping["startup_segments_outside_scope"] == 2
+    assert mapping["admission_mode"] == "catch_up"
+    assert mapping["admission_mode_transitions"] == 1
     assert mapping["backpressure_deferred_work"] == 3
     assert mapping["dropped_capacity_work"] == 1
     increments = client.client.pipeline_instance.increments
     assert increments["video_analysis_total"] == 9
     assert increments["startup_segments_selected_total"] == 4
     assert increments["startup_segments_outside_scope_total"] == 2
+    assert increments["admission_mode_transitions_total"] == 1
     assert increments["video_analysis_failure_total"] == 2
     assert increments["video_analysis_timeout_total"] == 1
     assert increments["video_freeze_interval_total"] == 4
