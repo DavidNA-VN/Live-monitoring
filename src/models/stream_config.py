@@ -12,6 +12,7 @@ from models.analysis import (
 )
 from models.admission import LiveAdmissionPolicy
 from models.stream import StreamIdentity, build_stream_identity
+from models.variant_selection import VariantSelectionPolicy
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,9 @@ class StreamConfig:
     media_playlist_workers: int = 4
     admission_policy: LiveAdmissionPolicy = field(
         default_factory=LiveAdmissionPolicy
+    )
+    variant_selection: VariantSelectionPolicy = field(
+        default_factory=VariantSelectionPolicy
     )
     alert_stream_max_length: int = 10_000
     black_screen_enabled: bool = True
@@ -120,6 +124,8 @@ class StreamConfig:
             )
         if not isinstance(self.admission_policy, LiveAdmissionPolicy):
             raise TypeError("admission_policy must be a LiveAdmissionPolicy")
+        if not isinstance(self.variant_selection, VariantSelectionPolicy):
+            raise TypeError("variant_selection must be a VariantSelectionPolicy")
 
     @property
     def identity(self) -> StreamIdentity:

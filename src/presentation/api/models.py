@@ -45,6 +45,8 @@ class AdmissionConfig(PresentationDTO):
     startup_lookback_segments: int = Field(default=4, gt=0)
     soft_lag_target_durations: float = Field(default=2.0, gt=0)
     recovery_lag_target_durations: float = Field(default=1.5, gt=0)
+    hard_lag_target_durations: float = Field(default=6.0, gt=0)
+    live_edge_retention_segments: int = Field(default=2, gt=0)
     transition_cycles: int = Field(default=3, gt=0)
 
     @model_validator(mode="after")
@@ -57,6 +59,29 @@ class AdmissionConfig(PresentationDTO):
                 "recovery_lag_target_durations must be less than "
                 "soft_lag_target_durations"
             )
+        if self.hard_lag_target_durations <= self.soft_lag_target_durations:
+            raise ValueError(
+                "hard_lag_target_durations must be greater than "
+                "soft_lag_target_durations"
+            )
+        return self
+
+
+class VariantSelectionConfig(PresentationDTO):
+    mode: Literal["all", "representative", "explicit"] = "all"
+    representative_count: int = Field(default=3, gt=0)
+    explicit_variant_ids: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_selection(self):
+        normalized = [value.strip() for value in self.explicit_variant_ids]
+        if any(not value for value in normalized):
+            raise ValueError("explicit_variant_ids must not contain empty IDs")
+        if self.mode == "explicit" and not normalized:
+            raise ValueError("explicit mode requires explicit_variant_ids")
+        if self.mode != "explicit" and normalized:
+            raise ValueError("explicit_variant_ids require explicit mode")
+        self.explicit_variant_ids = list(dict.fromkeys(normalized))
         return self
 
 # Gom nhóm các kiểm tra (checks)
@@ -75,6 +100,9 @@ class StreamConfigDTO(PresentationDTO):
     master_url: str = Field(..., min_length=1)
     checks: StreamChecks
     admission: AdmissionConfig = Field(default_factory=AdmissionConfig)
+    variant_selection: VariantSelectionConfig = Field(
+        default_factory=VariantSelectionConfig
+    )
 
     @field_validator("master_url")
     @classmethod
@@ -213,3 +241,26 @@ class RuntimeStatusDTO(PresentationDTO):
     checks: Dict[str, Literal["ENABLED", "DISABLED"]]
     worker_id: Optional[str] = Field(None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     observed_at: Optional[datetime] = None
+    admission_mode: Literal[
+        "coverage", "catch_up", "live_edge_protection"
+    ] = "coverage"
+    startup_segments_outside_scope: int = Field(default=0, ge=0)
+    dropped_expired_work: int = Field(default=0, ge=0)
+    dropped_capacity_work: int = Field(default=0, ge=0)
+    dropped_live_edge_work: int = Field(default=0, ge=0)
+    coverage_gap_count: int = Field(default=0, ge=0)
+    coverage_gap_segment_count: int = Field(default=0, ge=0)
+    dropped_media_segment_count: int = Field(default=0, ge=0)
+    profile_analysis_total: Dict[str, int] = Field(default_factory=dict)
+    active_media_processes: int = Field(default=0, ge=0)
+    max_media_processes: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_media_process_capacity(self):
+        if self.active_media_processes > self.max_media_processes:
+            raise ValueError(
+                "active_media_processes cannot exceed max_media_processes"
+            )
+        if any(value < 0 for value in self.profile_analysis_total.values()):
+            raise ValueError("profile_analysis_total values must be >= 0")
+        return self

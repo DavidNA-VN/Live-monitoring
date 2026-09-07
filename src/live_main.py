@@ -9,6 +9,10 @@ from core.redis_client import RedisClient
 from core.redis_keys import RedisNamespace
 from models.stream_config import StreamConfig
 from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
+from models.variant_selection import (
+    VariantSelectionMode,
+    VariantSelectionPolicy,
+)
 from reporting.live_console import LiveAlertConsole
 
 
@@ -131,10 +135,40 @@ def parse_args(argv=None):
         help="Queue lag in target durations before coverage recovery",
     )
     parser.add_argument(
+        "--live-edge-hard-lag-segments",
+        type=float,
+        default=6.0,
+        help="Queue lag in target durations before dropping stale work",
+    )
+    parser.add_argument(
+        "--live-edge-retention-segments",
+        type=int,
+        default=2,
+        help="Newest queued segments retained per profile and variant",
+    )
+    parser.add_argument(
         "--catch-up-transition-cycles",
         type=int,
         default=3,
         help="Consecutive cycles required for admission mode changes",
+    )
+    parser.add_argument(
+        "--variant-selection",
+        choices=[mode.value for mode in VariantSelectionMode],
+        default=VariantSelectionMode.ALL.value,
+        help="Variant monitoring policy",
+    )
+    parser.add_argument(
+        "--representative-variants",
+        type=int,
+        default=3,
+        help="Number of low/mid/high video variants in representative mode",
+    )
+    parser.add_argument(
+        "--variant-id",
+        action="append",
+        default=[],
+        help="Variant display/stable ID; repeat for explicit mode",
     )
     parser.add_argument(
         "--command-worker",
@@ -217,6 +251,19 @@ def parse_args(argv=None):
         )
     if args.catch_up_transition_cycles <= 0:
         parser.error("--catch-up-transition-cycles must be > 0")
+    if args.live_edge_hard_lag_segments <= args.catch_up_soft_lag_segments:
+        parser.error(
+            "--live-edge-hard-lag-segments must be greater than "
+            "--catch-up-soft-lag-segments"
+        )
+    if args.live_edge_retention_segments <= 0:
+        parser.error("--live-edge-retention-segments must be > 0")
+    if args.representative_variants <= 0:
+        parser.error("--representative-variants must be > 0")
+    if args.variant_selection == "explicit" and not args.variant_id:
+        parser.error("--variant-selection explicit requires --variant-id")
+    if args.variant_selection != "explicit" and args.variant_id:
+        parser.error("--variant-id requires --variant-selection explicit")
     if args.projection_interval <= 0:
         parser.error("--projection-interval must be > 0")
     if args.heartbeat_interval <= 0:
@@ -296,7 +343,18 @@ def main():
                         recovery_lag_target_durations=(
                             args.catch_up_recovery_lag_segments
                         ),
+                        hard_lag_target_durations=(
+                            args.live_edge_hard_lag_segments
+                        ),
+                        live_edge_retention_segments=(
+                            args.live_edge_retention_segments
+                        ),
                         transition_cycles=args.catch_up_transition_cycles,
+                    ),
+                    variant_selection=VariantSelectionPolicy(
+                        mode=VariantSelectionMode(args.variant_selection),
+                        representative_count=args.representative_variants,
+                        explicit_variant_ids=tuple(args.variant_id),
                     ),
                 )
             )

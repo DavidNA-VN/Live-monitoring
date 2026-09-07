@@ -25,7 +25,11 @@ test('START payload carries explicit freeze configuration', async () => {
             'https://example.test/master.m3u8',
             'idempotency-1',
             null,
-            { videoFreezeEnabled: true }
+            {
+                videoFreezeEnabled: true,
+                variantSelectionMode: 'representative',
+                representativeVariantCount: 3
+            }
         );
         const payload = JSON.parse(request.options.body);
 
@@ -34,6 +38,11 @@ test('START payload carries explicit freeze configuration', async () => {
         assert.equal(payload.checks.video_freeze.noise_db, -60.0);
         assert.equal(payload.checks.video_freeze.warning_duration_seconds, 3.0);
         assert.equal(payload.checks.video_freeze.alert_duration_seconds, 5.0);
+        assert.deepEqual(payload.variant_selection, {
+            mode: 'representative',
+            representative_count: 3,
+            explicit_variant_ids: []
+        });
     } finally {
         globalThis.fetch = originalFetch;
     }

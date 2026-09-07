@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from threading import BoundedSemaphore, Condition
+from threading import Condition
 from time import monotonic
 from typing import Protocol
 
@@ -96,13 +96,20 @@ class CompositeProcessGate:
         for gate in reversed(self.gates):
             gate.release()
 
+    def snapshot(self) -> MediaProcessCapacitySnapshot:
+        local = self.gates[0]
+        snapshot = getattr(local, "snapshot", None)
+        if not callable(snapshot):
+            raise RuntimeError("Local process gate is not observable")
+        return snapshot()
+
 
 def process_gate(
     *,
     per_stream_limit: int,
     service_gate: ProcessGate | None = None,
 ) -> ProcessGate:
-    local = BoundedSemaphore(per_stream_limit)
+    local = ObservableProcessGate(per_stream_limit)
     if service_gate is None:
         return local
     return CompositeProcessGate(local, service_gate)

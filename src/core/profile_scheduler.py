@@ -19,12 +19,13 @@ from core.segment_admission import (
     AdmittedProfileSegment,
     ProfileSegmentIdentity,
     SegmentAdmissionQueue,
+    group_coverage_gaps,
 )
 from core.segment_processor import SegmentProcessor
 from core.segment_state import RedisSegmentStateStore
 from models.playlist_snapshot import MediaPlaylistSnapshot
 from models.analysis import ResourcePoolLimit
-from models.admission import LiveAdmissionPolicy
+from models.admission import AdmissionMode, LiveAdmissionPolicy
 from models.processing import (
     SegmentProcessingIdentity,
     SegmentProcessingRecord,
@@ -114,6 +115,9 @@ class ProfileScheduler:
         self.batch_lock = Lock()
         self.active_batches: set[tuple[str, str]] = set()
         self.dispatch_cursor = 0
+        self._dropped_media_segments: set[
+            tuple[str, int, int, int, str]
+        ] = set()
 
     def observe_queue_pressure(
         self,
@@ -127,6 +131,18 @@ class ProfileScheduler:
             target_duration=target_duration,
         )
         stats.admission_mode = self.admission_controller.mode.value
+        if (
+            self.admission_controller.mode
+            is AdmissionMode.LIVE_EDGE_PROTECTION
+        ):
+            drops = self.admission_queue.protect_live_edge(
+                retain_segments=(
+                    self.admission_controller.policy
+                    .live_edge_retention_segments
+                )
+            )
+            self._record_drops(stats, drops)
+            self._record_queue_metrics(stats)
         if transition is None:
             return
         stats.admission_mode_transition_count += 1
@@ -378,29 +394,50 @@ class ProfileScheduler:
             return False
         return record.attempts < self.state_store.max_attempts
 
-    @staticmethod
     def _record_drops(
+        self,
         stats: LiveCycleStats,
         drops: tuple[AdmissionDrop, ...],
     ) -> None:
-        for drop in drops:
+        gaps = group_coverage_gaps(drops)
+        for gap in gaps:
             logger.warning(
-                "Admission work dropped by policy profile=%s variant=%s "
-                "seq=%s reason=%s",
-                drop.identity.profile_name,
-                drop.identity.variant_stable_id,
-                drop.identity.sequence,
-                drop.reason.value,
+                "Admission coverage gap profile=%s variant=%s generation=%s "
+                "discontinuity=%s sequences=%s-%s reason=%s",
+                gap.profile_name,
+                gap.variant_stable_id,
+                gap.timeline_generation,
+                gap.discontinuity_sequence,
+                gap.start_sequence,
+                gap.end_sequence,
+                gap.reason.value,
                 extra={
-                    "event_name": "admission_work_dropped",
-                    "profile_name": drop.identity.profile_name,
-                    "variant_stable_id": (
-                        drop.identity.variant_stable_id
-                    ),
-                    "segment_sequence": drop.identity.sequence,
-                    "drop_reason": drop.reason.value,
+                    "event_name": "admission_coverage_gap",
+                    "profile_name": gap.profile_name,
+                    "variant_stable_id": gap.variant_stable_id,
+                    "timeline_generation": gap.timeline_generation,
+                    "discontinuity_sequence": gap.discontinuity_sequence,
+                    "start_sequence": gap.start_sequence,
+                    "end_sequence": gap.end_sequence,
+                    "segment_count": gap.segment_count,
+                    "drop_reason": gap.reason.value,
                 },
             )
+        stats.coverage_gap_count += len(gaps)
+        stats.coverage_gap_segment_count += len(drops)
+        self._dropped_media_segments.update(
+            (
+                drop.identity.variant_stable_id,
+                drop.identity.timeline_generation,
+                drop.identity.discontinuity_sequence,
+                drop.identity.sequence,
+                drop.identity.media_revision,
+            )
+            for drop in drops
+        )
+        stats.dropped_media_segment_count = len(
+            self._dropped_media_segments
+        )
         stats.dropped_work_count += len(drops)
         stats.dropped_expired_work_count += sum(
             drop.reason == AdmissionDropReason.EXPIRED for drop in drops
@@ -408,7 +445,16 @@ class ProfileScheduler:
         stats.dropped_capacity_work_count += sum(
             drop.reason == AdmissionDropReason.CAPACITY for drop in drops
         )
+        stats.dropped_live_edge_work_count += sum(
+            drop.reason == AdmissionDropReason.LIVE_EDGE_PROTECTION
+            for drop in drops
+        )
 
     def _record_queue_metrics(self, stats: LiveCycleStats) -> None:
         stats.queue_depth = self.admission_queue.depth
         stats.queue_lag_seconds = self.admission_queue.oldest_age_seconds
+        snapshot = getattr(self.media_process_gate, "snapshot", None)
+        if callable(snapshot):
+            capacity = snapshot()
+            stats.active_media_processes = capacity.active
+            stats.max_media_processes = capacity.maximum

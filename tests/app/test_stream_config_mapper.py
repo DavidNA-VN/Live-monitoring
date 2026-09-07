@@ -36,7 +36,14 @@ def test_stream_config_to_public_serialization():
         "startup_lookback_segments": 4,
         "soft_lag_target_durations": 2.0,
         "recovery_lag_target_durations": 1.5,
+        "hard_lag_target_durations": 6.0,
+        "live_edge_retention_segments": 2,
         "transition_cycles": 3,
+    }
+    assert public_dict["variant_selection"] == {
+        "mode": "all",
+        "representative_count": 3,
+        "explicit_variant_ids": [],
     }
     assert public_dict["checks"]["black_screen"]["enabled"] is True
     assert public_dict["checks"]["audio_loss"]["enabled"] is True
@@ -69,6 +76,9 @@ def test_stream_config_to_public_serialization():
     assert reconstructed.admission_policy.startup_lookback_segments == 4
     assert reconstructed.admission_policy.soft_lag_target_durations == 2.0
     assert reconstructed.admission_policy.recovery_lag_target_durations == 1.5
+    assert reconstructed.admission_policy.hard_lag_target_durations == 6.0
+    assert reconstructed.admission_policy.live_edge_retention_segments == 2
+    assert reconstructed.variant_selection.mode.value == "all"
     assert reconstructed.admission_policy.transition_cycles == 3
 
 

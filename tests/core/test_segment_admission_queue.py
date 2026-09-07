@@ -1,6 +1,7 @@
 from core.segment_admission import (
     AdmissionDropReason,
     SegmentAdmissionQueue,
+    group_coverage_gaps,
 )
 from tests.factories.hls import make_segment
 
@@ -117,3 +118,31 @@ def test_acknowledged_item_is_suppressed_while_playlist_retains_it():
 
     assert result.suppressed == 1
     assert queue.depth == 0
+
+
+def test_live_edge_protection_keeps_newest_and_inflight_work():
+    queue = SegmentAdmissionQueue(
+        max_items=20,
+        max_age_seconds=30,
+        clock=FakeClock(),
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(sequence) for sequence in range(100, 106)],
+    )
+    inflight = queue.snapshot()[1].identity
+    queue.protect([inflight])
+
+    drops = queue.protect_live_edge(retain_segments=2)
+
+    assert [item.identity.sequence for item in queue.snapshot()] == [101, 104, 105]
+    assert [drop.identity.sequence for drop in drops] == [100, 102, 103]
+    assert all(
+        drop.reason is AdmissionDropReason.LIVE_EDGE_PROTECTION
+        for drop in drops
+    )
+    gaps = group_coverage_gaps(drops)
+    assert [(gap.start_sequence, gap.end_sequence) for gap in gaps] == [
+        (100, 100),
+        (102, 103),
+    ]

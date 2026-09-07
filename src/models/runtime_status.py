@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import math
@@ -61,12 +61,44 @@ class RuntimeStatus:
     schema_version: str = RUNTIME_STATUS_SCHEMA_VERSION
     worker_id: str | None = None
     observed_at: datetime | None = None
+    admission_mode: str = "coverage"
+    startup_segments_outside_scope: int = 0
+    dropped_expired_work: int = 0
+    dropped_capacity_work: int = 0
+    dropped_live_edge_work: int = 0
+    coverage_gap_count: int = 0
+    coverage_gap_segment_count: int = 0
+    dropped_media_segment_count: int = 0
+    profile_analysis_total: Mapping[str, int] = field(default_factory=dict)
+    active_media_processes: int = 0
+    max_media_processes: int = 0
 
     def __post_init__(self) -> None:
         if self.active_variant_count < 0:
             raise ValueError("active_variant_count must be >= 0")
         if self.queue_depth < 0:
             raise ValueError("queue_depth must be >= 0")
+        if self.admission_mode not in {
+            "coverage",
+            "catch_up",
+            "live_edge_protection",
+        }:
+            raise ValueError("admission_mode is invalid")
+        counters = {
+            "startup_segments_outside_scope": self.startup_segments_outside_scope,
+            "dropped_expired_work": self.dropped_expired_work,
+            "dropped_capacity_work": self.dropped_capacity_work,
+            "dropped_live_edge_work": self.dropped_live_edge_work,
+            "coverage_gap_count": self.coverage_gap_count,
+            "coverage_gap_segment_count": self.coverage_gap_segment_count,
+            "dropped_media_segment_count": self.dropped_media_segment_count,
+            "active_media_processes": self.active_media_processes,
+            "max_media_processes": self.max_media_processes,
+        }
+        if any(value < 0 for value in counters.values()):
+            raise ValueError("runtime telemetry counters must be >= 0")
+        if self.active_media_processes > self.max_media_processes:
+            raise ValueError("active_media_processes cannot exceed maximum")
         if self.queue_lag_seconds is not None and (
             not math.isfinite(self.queue_lag_seconds)
             or self.queue_lag_seconds < 0
@@ -100,6 +132,21 @@ class RuntimeStatus:
             else:
                 object.__setattr__(self, "last_poll_at", self.last_poll_at.astimezone(timezone.utc))
         object.__setattr__(self, "checks", MappingProxyType(dict(self.checks)))
+        profile_totals = dict(self.profile_analysis_total)
+        if any(
+            not isinstance(name, str)
+            or not name
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            for name, value in profile_totals.items()
+        ):
+            raise ValueError("profile_analysis_total is invalid")
+        object.__setattr__(
+            self,
+            "profile_analysis_total",
+            MappingProxyType(profile_totals),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -116,6 +163,19 @@ class RuntimeStatus:
             "error": self.error,
             "telemetry_available": self.telemetry_available,
             "health_reasons": list(self.health_reasons),
+            "admission_mode": self.admission_mode,
+            "startup_segments_outside_scope": (
+                self.startup_segments_outside_scope
+            ),
+            "dropped_expired_work": self.dropped_expired_work,
+            "dropped_capacity_work": self.dropped_capacity_work,
+            "dropped_live_edge_work": self.dropped_live_edge_work,
+            "coverage_gap_count": self.coverage_gap_count,
+            "coverage_gap_segment_count": self.coverage_gap_segment_count,
+            "dropped_media_segment_count": self.dropped_media_segment_count,
+            "profile_analysis_total": dict(self.profile_analysis_total),
+            "active_media_processes": self.active_media_processes,
+            "max_media_processes": self.max_media_processes,
             "checks": {
                 name: (
                     status.value if isinstance(status, CheckStatus) else str(status)

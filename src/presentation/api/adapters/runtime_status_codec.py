@@ -32,6 +32,17 @@ ALLOWED_KEYS: Set[str] = {
     "checks",
     "worker_id",
     "observed_at",
+    "admission_mode",
+    "startup_segments_outside_scope",
+    "dropped_expired_work",
+    "dropped_capacity_work",
+    "dropped_live_edge_work",
+    "coverage_gap_count",
+    "coverage_gap_segment_count",
+    "dropped_media_segment_count",
+    "profile_analysis_total",
+    "active_media_processes",
+    "max_media_processes",
 }
 
 REQUIRED_KEYS: Set[str] = {
@@ -155,6 +166,67 @@ def parse_public_runtime_status(
     if raw_queue_depth < 0:
         raise RuntimeStatusCodecError(f"Field 'queue_depth' cannot be negative, got {raw_queue_depth}")
 
+    def _optional_non_negative_int(field_name: str) -> int:
+        value = data.get(field_name, 0)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise RuntimeStatusCodecError(
+                f"Field '{field_name}' must be an integer"
+            )
+        if value < 0:
+            raise RuntimeStatusCodecError(
+                f"Field '{field_name}' cannot be negative"
+            )
+        return value
+
+    telemetry_counters = {
+        name: _optional_non_negative_int(name)
+        for name in (
+            "startup_segments_outside_scope",
+            "dropped_expired_work",
+            "dropped_capacity_work",
+            "dropped_live_edge_work",
+            "coverage_gap_count",
+            "coverage_gap_segment_count",
+            "dropped_media_segment_count",
+            "active_media_processes",
+            "max_media_processes",
+        )
+    }
+    if (
+        telemetry_counters["active_media_processes"]
+        > telemetry_counters["max_media_processes"]
+    ):
+        raise RuntimeStatusCodecError(
+            "active_media_processes cannot exceed max_media_processes"
+        )
+
+    admission_mode = data.get("admission_mode", "coverage")
+    if admission_mode not in {
+        "coverage",
+        "catch_up",
+        "live_edge_protection",
+    }:
+        raise RuntimeStatusCodecError("Field 'admission_mode' is invalid")
+
+    raw_profile_totals = data.get("profile_analysis_total", {})
+    if not isinstance(raw_profile_totals, dict):
+        raise RuntimeStatusCodecError(
+            "Field 'profile_analysis_total' must be an object"
+        )
+    profile_analysis_total: Dict[str, int] = {}
+    for profile_name, value in raw_profile_totals.items():
+        if (
+            not isinstance(profile_name, str)
+            or not profile_name
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            raise RuntimeStatusCodecError(
+                "Field 'profile_analysis_total' contains invalid data"
+            )
+        profile_analysis_total[profile_name] = value
+
     # 8. Validate optional queue_lag_seconds (must be finite, not boolean, >= 0)
     raw_lag = data.get("queue_lag_seconds")
     queue_lag_seconds: float | None = None
@@ -254,6 +326,9 @@ def parse_public_runtime_status(
             checks=checks,
             worker_id=worker_id,
             observed_at=observed_at,
+            admission_mode=admission_mode,
+            profile_analysis_total=profile_analysis_total,
+            **telemetry_counters,
         )
     except ValidationError as exc:
         raise RuntimeStatusCodecError(

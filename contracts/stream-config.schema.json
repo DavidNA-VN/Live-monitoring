@@ -35,10 +35,34 @@
           "exclusiveMinimum": 0,
           "default": 1.5
         },
+        "hard_lag_target_durations": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 6.0
+        },
+        "live_edge_retention_segments": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2
+        },
         "transition_cycles": {
           "type": "integer",
           "minimum": 1,
           "default": 3
+        }
+      }
+    },
+    "variant_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["all", "representative", "explicit"], "default": "all"},
+        "representative_count": {"type": "integer", "minimum": 1, "default": 3},
+        "explicit_variant_ids": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "default": []
         }
       }
     },

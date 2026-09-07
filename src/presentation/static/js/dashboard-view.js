@@ -5,6 +5,9 @@ export class DashboardView {
         this.streamForm = document.getElementById('stream-form');
         this.streamIdInput = document.getElementById('stream-id');
         this.masterUrlInput = document.getElementById('master-url');
+        this.variantSelectionInput = document.getElementById(
+            'variant-selection'
+        );
         this.freezeEnabledInput = document.getElementById('check-video-freeze');
         this.startBtn = document.getElementById('btn-start');
         this.pauseBtn = document.getElementById('btn-pause');
@@ -20,6 +23,19 @@ export class DashboardView {
         this.statRes = document.querySelector('#stat-resolution .val');
         this.statFps = document.querySelector('#stat-fps .val');
         this.statBitrate = document.querySelector('#stat-bitrate .val');
+        this.statAdmissionMode = document.querySelector(
+            '#stat-admission-mode .val'
+        );
+        this.statQueueLag = document.querySelector('#stat-queue-lag .val');
+        this.statCoverageGaps = document.querySelector(
+            '#stat-coverage-gaps .val'
+        );
+        this.statDroppedSegments = document.querySelector(
+            '#stat-dropped-segments .val'
+        );
+        this.statMediaProcesses = document.querySelector(
+            '#stat-media-processes .val'
+        );
     }
 
     setModeBadge(mode) {
@@ -87,9 +103,48 @@ export class DashboardView {
         }
     }
 
+    setRuntimeTelemetry(status) {
+        if (!status) return;
+        if (this.statAdmissionMode) {
+            this.statAdmissionMode.textContent = (
+                status.admission_mode || 'coverage'
+            ).toUpperCase();
+        }
+        if (this.statQueueLag) {
+            const lag = status.queue_lag_seconds;
+            this.statQueueLag.textContent = Number.isFinite(lag)
+                ? `${lag.toFixed(1)} s`
+                : '--';
+        }
+        if (this.statCoverageGaps) {
+            this.statCoverageGaps.textContent = String(
+                status.coverage_gap_count || 0
+            );
+        }
+        if (this.statDroppedSegments) {
+            this.statDroppedSegments.textContent = String(
+                status.dropped_media_segment_count || 0
+            );
+        }
+        if (this.statMediaProcesses) {
+            this.statMediaProcesses.textContent = (
+                `${status.active_media_processes || 0} / `
+                + `${status.max_media_processes || 0}`
+            );
+        }
+    }
+
     resetTelemetry() {
         this.setSystemStatus('IDLE');
         this.setTelemetry({ resolution: '--', fps: '--', bitrate: '--' });
+        this.setRuntimeTelemetry({
+            admission_mode: 'coverage',
+            queue_lag_seconds: null,
+            coverage_gap_count: 0,
+            dropped_media_segment_count: 0,
+            active_media_processes: 0,
+            max_media_processes: 0,
+        });
         if (this.audioLevelBar) this.audioLevelBar.style.height = '0%';
     }
 
@@ -132,6 +187,12 @@ export class DashboardView {
         typeBadge.className = 'badge badge-type';
         typeBadge.textContent = presentation.eventType;
         div.append(timeSpan, stateBadge, typeBadge);
+        if (presentation.variantLabel) {
+            const variantBadge = document.createElement('span');
+            variantBadge.className = 'badge badge-variant';
+            variantBadge.textContent = presentation.variantLabel;
+            div.append(variantBadge);
+        }
         if (presentation.severity) {
             const severityBadge = document.createElement('span');
             severityBadge.className = (

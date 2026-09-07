@@ -27,6 +27,8 @@ class AdaptiveAdmissionController:
         self.mode = AdmissionMode.COVERAGE
         self._over_soft_cycles = 0
         self._under_recovery_cycles = 0
+        self._over_hard_cycles = 0
+        self._under_protection_recovery_cycles = 0
 
     def observe(
         self,
@@ -44,6 +46,7 @@ class AdaptiveAdmissionController:
         recovery_limit = (
             target_duration * self.policy.recovery_lag_target_durations
         )
+        hard_limit = target_duration * self.policy.hard_lag_target_durations
 
         if self.mode is AdmissionMode.COVERAGE:
             self._under_recovery_cycles = 0
@@ -60,16 +63,46 @@ class AdaptiveAdmissionController:
                 target_duration=target_duration,
             )
 
-        self._over_soft_cycles = 0
-        self._under_recovery_cycles = (
-            self._under_recovery_cycles + 1
-            if queue_lag_seconds < recovery_limit
+        if self.mode is AdmissionMode.CATCH_UP:
+            self._over_soft_cycles = 0
+            self._under_protection_recovery_cycles = 0
+            self._over_hard_cycles = (
+                self._over_hard_cycles + 1
+                if queue_lag_seconds > hard_limit
+                else 0
+            )
+            self._under_recovery_cycles = (
+                self._under_recovery_cycles + 1
+                if queue_lag_seconds < recovery_limit
+                else 0
+            )
+            if self._over_hard_cycles >= self.policy.transition_cycles:
+                return self._transition(
+                    AdmissionMode.LIVE_EDGE_PROTECTION,
+                    queue_lag_seconds=queue_lag_seconds,
+                    target_duration=target_duration,
+                )
+            if self._under_recovery_cycles >= self.policy.transition_cycles:
+                return self._transition(
+                    AdmissionMode.COVERAGE,
+                    queue_lag_seconds=queue_lag_seconds,
+                    target_duration=target_duration,
+                )
+            return None
+
+        self._under_recovery_cycles = 0
+        self._under_protection_recovery_cycles = (
+            self._under_protection_recovery_cycles + 1
+            if queue_lag_seconds < soft_limit
             else 0
         )
-        if self._under_recovery_cycles < self.policy.transition_cycles:
+        if (
+            self._under_protection_recovery_cycles
+            < self.policy.transition_cycles
+        ):
             return None
         return self._transition(
-            AdmissionMode.COVERAGE,
+            AdmissionMode.CATCH_UP,
             queue_lag_seconds=queue_lag_seconds,
             target_duration=target_duration,
         )
@@ -94,6 +127,8 @@ class AdaptiveAdmissionController:
     def _reset_evidence(self) -> None:
         self._over_soft_cycles = 0
         self._under_recovery_cycles = 0
+        self._over_hard_cycles = 0
+        self._under_protection_recovery_cycles = 0
 
 
 @dataclass(frozen=True)
@@ -117,12 +152,28 @@ class AdmittedProfileSegment:
 class AdmissionDropReason(str, Enum):
     EXPIRED = "expired"
     CAPACITY = "capacity"
+    LIVE_EDGE_PROTECTION = "live_edge_protection"
 
 
 @dataclass(frozen=True)
 class AdmissionDrop:
     identity: ProfileSegmentIdentity
     reason: AdmissionDropReason
+
+
+@dataclass(frozen=True)
+class CoverageGap:
+    profile_name: str
+    variant_stable_id: str
+    timeline_generation: int
+    discontinuity_sequence: int
+    start_sequence: int
+    end_sequence: int
+    reason: AdmissionDropReason
+
+    @property
+    def segment_count(self) -> int:
+        return self.end_sequence - self.start_sequence + 1
 
 
 @dataclass(frozen=True)
@@ -143,6 +194,13 @@ class AdmissionQueue(Protocol):
         ...
 
     def expire(self) -> tuple[AdmissionDrop, ...]:
+        ...
+
+    def protect_live_edge(
+        self,
+        *,
+        retain_segments: int,
+    ) -> tuple[AdmissionDrop, ...]:
         ...
 
     def snapshot(self) -> tuple[AdmittedProfileSegment, ...]:
@@ -263,6 +321,55 @@ class SegmentAdmissionQueue:
             self._purge_suppression(now)
             return tuple(self._expire(now))
 
+    def protect_live_edge(
+        self,
+        *,
+        retain_segments: int,
+    ) -> tuple[AdmissionDrop, ...]:
+        if retain_segments <= 0:
+            raise ValueError("retain_segments must be > 0")
+        now = self.clock()
+        with self._lock:
+            groups: dict[
+                tuple[str, str, int, int],
+                list[ProfileSegmentIdentity],
+            ] = {}
+            for identity in self._items:
+                key = (
+                    identity.profile_name,
+                    identity.variant_stable_id,
+                    identity.timeline_generation,
+                    identity.discontinuity_sequence,
+                )
+                groups.setdefault(key, []).append(identity)
+
+            drops: list[AdmissionDrop] = []
+            for identities in groups.values():
+                ordered = sorted(
+                    identities,
+                    key=lambda item: (item.sequence, item.media_revision),
+                )
+                retained_sequences = set(
+                    sorted({item.sequence for item in ordered})[
+                        -retain_segments:
+                    ]
+                )
+                for identity in ordered:
+                    if (
+                        identity.sequence in retained_sequences
+                        or identity in self._protected
+                    ):
+                        continue
+                    del self._items[identity]
+                    self._suppress(identity, now)
+                    drops.append(
+                        AdmissionDrop(
+                            identity,
+                            AdmissionDropReason.LIVE_EDGE_PROTECTION,
+                        )
+                    )
+            return tuple(drops)
+
     def snapshot(self) -> tuple[AdmittedProfileSegment, ...]:
         with self._lock:
             return tuple(self._items.values())
@@ -367,3 +474,35 @@ class SegmentAdmissionQueue:
         for identity, deadline in tuple(self._suppressed_until.items()):
             if deadline <= now:
                 del self._suppressed_until[identity]
+
+
+def group_coverage_gaps(
+    drops: Iterable[AdmissionDrop],
+) -> tuple[CoverageGap, ...]:
+    grouped: dict[
+        tuple[str, str, int, int, AdmissionDropReason],
+        set[int],
+    ] = {}
+    for drop in drops:
+        identity = drop.identity
+        key = (
+            identity.profile_name,
+            identity.variant_stable_id,
+            identity.timeline_generation,
+            identity.discontinuity_sequence,
+            drop.reason,
+        )
+        grouped.setdefault(key, set()).add(identity.sequence)
+
+    gaps: list[CoverageGap] = []
+    for key, sequences in grouped.items():
+        ordered = sorted(sequences)
+        start = previous = ordered[0]
+        for sequence in ordered[1:] + [None]:
+            if sequence is not None and sequence == previous + 1:
+                previous = sequence
+                continue
+            gaps.append(CoverageGap(*key[:4], start, previous, key[4]))
+            if sequence is not None:
+                start = previous = sequence
+    return tuple(gaps)

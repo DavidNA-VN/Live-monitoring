@@ -20,6 +20,23 @@ test('freeze warning is rendered as warning severity', () => {
     assert.equal(result.typeLabel, 'Video freeze');
 });
 
+test('alert presentation exposes a readable rendition label', () => {
+    const named = presentAlert({
+        event_type: 'BLACK_SCREEN',
+        state: 'OPEN',
+        variant_id: '360p',
+        variant_stable_id: '1234567890abcdef'
+    });
+    const stableOnly = presentAlert({
+        event_type: 'BLACK_SCREEN',
+        state: 'OPEN',
+        variant_stable_id: '1234567890abcdef'
+    });
+
+    assert.equal(named.variantLabel, '360p');
+    assert.equal(stableOnly.variantLabel, '12345678');
+});
+
 
 test('freeze update is rendered as alert on the same lifecycle', () => {
     const result = presentAlert({

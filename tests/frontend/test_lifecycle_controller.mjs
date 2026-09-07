@@ -16,6 +16,7 @@ function makeController(apiOverrides = {}) {
         setButtonsState() {},
         addSystemLog() {},
         setSystemStatus() {},
+        setRuntimeTelemetry() {},
         resetTelemetry() { calls.resets += 1; },
     };
     const mediaSession = {
@@ -46,7 +47,7 @@ test('pause does not claim PAUSED before runtime confirmation', async () => {
     assert.equal(calls.mediaPause, 0);
 });
 
-test('START forwards the opt-in freeze configuration', async () => {
+test('START forwards freeze and variant selection configuration', async () => {
     let receivedOptions = null;
     const { controller } = makeController({
         startStream: async (
@@ -64,10 +65,18 @@ test('START forwards the opt-in freeze configuration', async () => {
     await controller.handleStart(
         'channel-01',
         'https://example.test/master.m3u8',
-        { videoFreezeEnabled: true }
+        {
+            videoFreezeEnabled: true,
+            variantSelectionMode: 'representative',
+            representativeVariantCount: 3
+        }
     );
 
-    assert.deepEqual(receivedOptions, { videoFreezeEnabled: true });
+    assert.deepEqual(receivedOptions, {
+        videoFreezeEnabled: true,
+        variantSelectionMode: 'representative',
+        representativeVariantCount: 3
+    });
 });
 
 test('failed STOP submission preserves the active session', async () => {

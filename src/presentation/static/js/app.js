@@ -53,10 +53,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             const streamId = view.streamIdInput.value.trim();
             const masterUrl = view.masterUrlInput.value.trim();
             if (streamId && masterUrl) {
+                const selection = (
+                    view.variantSelectionInput?.value || 'representative:2'
+                );
+                const [selectionMode, selectionCount] = selection.split(':');
                 controller.handleStart(streamId, masterUrl, {
                     videoFreezeEnabled: (
                         view.freezeEnabledInput?.checked === true
-                    )
+                    ),
+                    variantSelectionMode: selectionMode,
+                    representativeVariantCount: Number(selectionCount) || 2
                 });
             }
         });

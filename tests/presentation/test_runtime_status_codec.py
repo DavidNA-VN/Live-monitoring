@@ -30,6 +30,17 @@ def valid_status_payload() -> dict:
         },
         "worker_id": "worker-node-01",
         "observed_at": "2026-08-28T10:00:05+00:00",
+        "admission_mode": "catch_up",
+        "startup_segments_outside_scope": 2,
+        "dropped_expired_work": 1,
+        "dropped_capacity_work": 3,
+        "dropped_live_edge_work": 4,
+        "coverage_gap_count": 2,
+        "coverage_gap_segment_count": 5,
+        "dropped_media_segment_count": 3,
+        "profile_analysis_total": {"video_realtime": 12},
+        "active_media_processes": 2,
+        "max_media_processes": 4,
     }
 
 
@@ -52,6 +63,12 @@ def test_1_parse_full_valid_snapshot():
     assert dto.last_poll_at == datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
     assert dto.checks == {"black_screen": "ENABLED", "audio_loss": "DISABLED"}
     assert dto.health_reasons == ["All variants healthy"]
+    assert dto.admission_mode == "catch_up"
+    assert dto.coverage_gap_count == 2
+    assert dto.dropped_media_segment_count == 3
+    assert dto.profile_analysis_total == {"video_realtime": 12}
+    assert dto.active_media_processes == 2
+    assert dto.max_media_processes == 4
 
 
 def test_2_parse_optional_nullable_fields():

@@ -138,6 +138,17 @@ class SupervisorRuntimeStatusReader:
         queue_lag_seconds = None
         live_edge_lag_seconds = None
         last_poll_at = None
+        admission_mode = "coverage"
+        startup_segments_outside_scope = 0
+        dropped_expired_work = 0
+        dropped_capacity_work = 0
+        dropped_live_edge_work = 0
+        coverage_gap_count = 0
+        coverage_gap_segment_count = 0
+        dropped_media_segment_count = 0
+        profile_analysis_total: dict[str, int] = {}
+        active_media_processes = 0
+        max_media_processes = 0
 
         if telemetry_available:
             # Parse health
@@ -179,6 +190,61 @@ class SupervisorRuntimeStatusReader:
                             queue_depth = qd_int
                     except (ValueError, TypeError):
                         pass
+
+                def _non_negative_int(field_name: str) -> int:
+                    raw = _get_metric_field(field_name)
+                    try:
+                        value = int(raw)
+                    except (ValueError, TypeError):
+                        return 0
+                    return value if value >= 0 else 0
+
+                raw_mode = _get_metric_field("admission_mode")
+                if isinstance(raw_mode, bytes):
+                    raw_mode = raw_mode.decode("utf-8", errors="replace")
+                if raw_mode in {
+                    "coverage",
+                    "catch_up",
+                    "live_edge_protection",
+                }:
+                    admission_mode = raw_mode
+
+                startup_segments_outside_scope = _non_negative_int(
+                    "startup_segments_outside_scope_total"
+                )
+                dropped_expired_work = _non_negative_int(
+                    "dropped_expired_work_total"
+                )
+                dropped_capacity_work = _non_negative_int(
+                    "dropped_capacity_work_total"
+                )
+                dropped_live_edge_work = _non_negative_int(
+                    "dropped_live_edge_work_total"
+                )
+                coverage_gap_count = _non_negative_int("coverage_gap_total")
+                coverage_gap_segment_count = _non_negative_int(
+                    "coverage_gap_segment_total"
+                )
+                dropped_media_segment_count = _non_negative_int(
+                    "dropped_media_segments_total"
+                )
+                active_media_processes = _non_negative_int(
+                    "active_media_processes"
+                )
+                max_media_processes = _non_negative_int(
+                    "max_media_processes"
+                )
+                active_media_processes = min(
+                    active_media_processes,
+                    max_media_processes,
+                )
+                for profile, metric_name in {
+                    "video_realtime": "video_analysis_total",
+                    "audio_realtime": "audio_analysis_total",
+                }.items():
+                    value = _non_negative_int(metric_name)
+                    if value:
+                        profile_analysis_total[profile] = value
 
                 ql = _get_metric_field("queue_lag_seconds")
                 if ql is not None:
@@ -225,4 +291,15 @@ class SupervisorRuntimeStatusReader:
             error=snap.error,
             telemetry_available=telemetry_available,
             health_reasons=health_reasons,
+            admission_mode=admission_mode,
+            startup_segments_outside_scope=startup_segments_outside_scope,
+            dropped_expired_work=dropped_expired_work,
+            dropped_capacity_work=dropped_capacity_work,
+            dropped_live_edge_work=dropped_live_edge_work,
+            coverage_gap_count=coverage_gap_count,
+            coverage_gap_segment_count=coverage_gap_segment_count,
+            dropped_media_segment_count=dropped_media_segment_count,
+            profile_analysis_total=profile_analysis_total,
+            active_media_processes=active_media_processes,
+            max_media_processes=max_media_processes,
         )

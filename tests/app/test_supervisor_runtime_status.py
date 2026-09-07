@@ -148,6 +148,18 @@ def test_running_and_healthy_telemetry_mapped_correctly():
         "queue_depth": "4",
         "queue_lag_seconds": "1.500000",
         "live_edge_lag_seconds": "3.250000",
+        "admission_mode": "live_edge_protection",
+        "startup_segments_outside_scope_total": "2",
+        "dropped_expired_work_total": "1",
+        "dropped_capacity_work_total": "3",
+        "dropped_live_edge_work_total": "4",
+        "coverage_gap_total": "2",
+        "coverage_gap_segment_total": "5",
+        "dropped_media_segments_total": "3",
+        "video_analysis_total": "12",
+        "audio_analysis_total": "8",
+        "active_media_processes": "2",
+        "max_media_processes": "4",
     }
     redis.hashes[keys.active_variants(storage_id)] = {"v720": "...", "v1080": "..."}
 
@@ -166,6 +178,20 @@ def test_running_and_healthy_telemetry_mapped_correctly():
     assert status.started_at == datetime(2026, 8, 26, 10, 0, 0, tzinfo=timezone.utc)
     assert status.last_poll_at == datetime(2026, 8, 26, 10, 5, 0, tzinfo=timezone.utc)
     assert status.telemetry_available is True
+    assert status.admission_mode == "live_edge_protection"
+    assert status.startup_segments_outside_scope == 2
+    assert status.dropped_expired_work == 1
+    assert status.dropped_capacity_work == 3
+    assert status.dropped_live_edge_work == 4
+    assert status.coverage_gap_count == 2
+    assert status.coverage_gap_segment_count == 5
+    assert status.dropped_media_segment_count == 3
+    assert status.profile_analysis_total == {
+        "video_realtime": 12,
+        "audio_realtime": 8,
+    }
+    assert status.active_media_processes == 2
+    assert status.max_media_processes == 4
     assert status.checks == {
         "black_screen": CheckStatus.ENABLED,
         "video_freeze": CheckStatus.DISABLED,

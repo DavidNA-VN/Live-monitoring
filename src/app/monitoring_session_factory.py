@@ -252,6 +252,7 @@ class MonitoringSessionFactory:
             media_playlist_workers=config.media_playlist_workers,
             request_headers=config.request_headers,
             admission_policy=config.admission_policy,
+            variant_selection=config.variant_selection,
         )
 
     @staticmethod

@@ -12,6 +12,8 @@ export function presentAlert(alert) {
     const eventType = String(alert?.event_type || 'ALERT').toUpperCase();
     const reason = String(alert?.reason || 'alert_received');
     const severity = String(alert?.attributes?.severity || '').toUpperCase();
+    const variantId = String(alert?.variant_id || '').trim();
+    const variantStableId = String(alert?.variant_stable_id || '').trim();
     const interrupted = state === 'RESOLVED' && reason === 'observation_gap';
 
     let visualClass = 'error';
@@ -30,6 +32,9 @@ export function presentAlert(alert) {
         typeLabel: TYPE_LABELS[eventType] || eventType,
         reason,
         severity: severity === 'WARNING' || severity === 'ALERT' ? severity : null,
+        variantLabel: variantId || (
+            variantStableId ? variantStableId.slice(0, 8) : null
+        ),
         visualClass,
         lifecycleLabel,
         interrupted

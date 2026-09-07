@@ -18,6 +18,7 @@ from models.playlist_delta import MediaPlaylistDelta
 from models.runtime import LiveCycleStats
 from models.segment import Segment
 from models.stream import StreamIdentity
+from models.variant_selection import VariantSelectionPolicy
 
 
 logger = logging.getLogger(__name__)
@@ -85,11 +86,13 @@ class LivePlaylistPoller:
         media_playlist_workers: int,
         request_headers: Mapping[str, str] | None = None,
         loader: Callable[..., MonitoringContext] = build_monitoring_context,
+        variant_selection: VariantSelectionPolicy | None = None,
     ) -> None:
         self.timeout = timeout
         self.media_playlist_workers = media_playlist_workers
         self.request_headers = request_headers
         self.loader = loader
+        self.variant_selection = variant_selection or VariantSelectionPolicy()
 
     def poll(self, stream: StreamIdentity) -> MonitoringContext:
         return self.loader(
@@ -97,6 +100,7 @@ class LivePlaylistPoller:
             playlist_timeout=self.timeout,
             request_headers=self.request_headers,
             media_playlist_workers=self.media_playlist_workers,
+            variant_selection=self.variant_selection,
         )
 
 

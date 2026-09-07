@@ -51,7 +51,14 @@ def test_stream_config_dto_valid():
         "startup_lookback_segments": 4,
         "soft_lag_target_durations": 2.0,
         "recovery_lag_target_durations": 1.5,
+        "hard_lag_target_durations": 6.0,
+        "live_edge_retention_segments": 2,
         "transition_cycles": 3,
+    }
+    assert data["variant_selection"] == {
+        "mode": "all",
+        "representative_count": 3,
+        "explicit_variant_ids": [],
     }
 
 

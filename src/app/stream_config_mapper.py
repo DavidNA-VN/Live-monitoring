@@ -6,6 +6,10 @@ from urllib.parse import urlparse
 
 from models.stream_config import StreamConfig
 from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
+from models.variant_selection import (
+    VariantSelectionMode,
+    VariantSelectionPolicy,
+)
 
 
 class StreamConfigMappingError(ValueError):
@@ -28,7 +32,22 @@ def stream_config_to_public(config: StreamConfig) -> dict[str, Any]:
             "recovery_lag_target_durations": (
                 config.admission_policy.recovery_lag_target_durations
             ),
+            "hard_lag_target_durations": (
+                config.admission_policy.hard_lag_target_durations
+            ),
+            "live_edge_retention_segments": (
+                config.admission_policy.live_edge_retention_segments
+            ),
             "transition_cycles": config.admission_policy.transition_cycles,
+        },
+        "variant_selection": {
+            "mode": config.variant_selection.mode.value,
+            "representative_count": (
+                config.variant_selection.representative_count
+            ),
+            "explicit_variant_ids": list(
+                config.variant_selection.explicit_variant_ids
+            ),
         },
         "checks": {
             "black_screen": {
@@ -66,6 +85,7 @@ def stream_config_from_public(data: object) -> StreamConfig:
         "master_url",
         "checks",
         "admission",
+        "variant_selection",
     }
     unknown = set(data) - allowed
     if unknown:
@@ -84,7 +104,17 @@ def stream_config_from_public(data: object) -> StreamConfig:
             "startup_lookback_segments": 4,
             "soft_lag_target_durations": 2.0,
             "recovery_lag_target_durations": 1.5,
+            "hard_lag_target_durations": 6.0,
+            "live_edge_retention_segments": 2,
             "transition_cycles": 3,
+        },
+    )
+    variant_selection = data.get(
+        "variant_selection",
+        {
+            "mode": "all",
+            "representative_count": 3,
+            "explicit_variant_ids": [],
         },
     )
     if not isinstance(stream_id, str) or not stream_id.strip():
@@ -100,6 +130,41 @@ def stream_config_from_public(data: object) -> StreamConfig:
         raise StreamConfigMappingError("config.checks must be an object")
     if not isinstance(admission, dict):
         raise StreamConfigMappingError("config.admission must be an object")
+    if not isinstance(variant_selection, dict):
+        raise StreamConfigMappingError(
+            "config.variant_selection must be an object"
+        )
+    allowed_selection_fields = {
+        "mode",
+        "representative_count",
+        "explicit_variant_ids",
+    }
+    if set(variant_selection) - allowed_selection_fields:
+        raise StreamConfigMappingError("invalid config.variant_selection fields")
+    try:
+        selection_mode = VariantSelectionMode(
+            variant_selection.get("mode", "all")
+        )
+    except (TypeError, ValueError) as exc:
+        raise StreamConfigMappingError(
+            "config.variant_selection.mode is invalid"
+        ) from exc
+    representative_count = variant_selection.get("representative_count", 3)
+    if (
+        isinstance(representative_count, bool)
+        or not isinstance(representative_count, int)
+        or representative_count <= 0
+    ):
+        raise StreamConfigMappingError(
+            "config.variant_selection.representative_count must be > 0"
+        )
+    explicit_ids = variant_selection.get("explicit_variant_ids", [])
+    if not isinstance(explicit_ids, list) or any(
+        not isinstance(value, str) for value in explicit_ids
+    ):
+        raise StreamConfigMappingError(
+            "config.variant_selection.explicit_variant_ids must be strings"
+        )
     required_admission_fields = {
         "startup_mode",
         "startup_lookback_segments",
@@ -107,6 +172,8 @@ def stream_config_from_public(data: object) -> StreamConfig:
     optional_admission_fields = {
         "soft_lag_target_durations",
         "recovery_lag_target_durations",
+        "hard_lag_target_durations",
+        "live_edge_retention_segments",
         "transition_cycles",
     }
     if (
@@ -139,6 +206,19 @@ def stream_config_from_public(data: object) -> StreamConfig:
         admission.get("recovery_lag_target_durations", 1.5),
         "config.admission.recovery_lag_target_durations",
     )
+    hard_lag = _positive_finite_config_number(
+        admission.get("hard_lag_target_durations", 6.0),
+        "config.admission.hard_lag_target_durations",
+    )
+    live_edge_retention = admission.get("live_edge_retention_segments", 2)
+    if (
+        isinstance(live_edge_retention, bool)
+        or not isinstance(live_edge_retention, int)
+        or live_edge_retention <= 0
+    ):
+        raise StreamConfigMappingError(
+            "config.admission.live_edge_retention_segments must be > 0"
+        )
     transition_cycles = admission.get("transition_cycles", 3)
     if (
         isinstance(transition_cycles, bool)
@@ -250,7 +330,14 @@ def stream_config_from_public(data: object) -> StreamConfig:
                 startup_lookback_segments=startup_lookback,
                 soft_lag_target_durations=soft_lag,
                 recovery_lag_target_durations=recovery_lag,
+                hard_lag_target_durations=hard_lag,
+                live_edge_retention_segments=live_edge_retention,
                 transition_cycles=transition_cycles,
+            ),
+            variant_selection=VariantSelectionPolicy(
+                mode=selection_mode,
+                representative_count=representative_count,
+                explicit_variant_ids=tuple(explicit_ids),
             ),
         )
     except (TypeError, ValueError) as exc:

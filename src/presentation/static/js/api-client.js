@@ -44,10 +44,22 @@ export class ApiClient {
         options = {}
     ) {
         const key = idempotencyKey || this.generateIdempotencyKey();
+        const variantSelectionMode = (
+            options.variantSelectionMode === 'all'
+                ? 'all'
+                : 'representative'
+        );
         const payload = {
             schema_version: "1.0",
             stream_id: streamId,
             master_url: masterUrl,
+            variant_selection: {
+                mode: variantSelectionMode,
+                representative_count: (
+                    options.representativeVariantCount || 3
+                ),
+                explicit_variant_ids: []
+            },
             checks: {
                 black_screen: { enabled: true },
                 audio_loss: {

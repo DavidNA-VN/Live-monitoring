@@ -36,6 +36,7 @@ from models.analysis import (
 from models.admission import LiveAdmissionPolicy
 from models.runtime import LiveCycleStats
 from models.stream import StreamIdentity
+from models.variant_selection import VariantSelectionPolicy
 from playlist.errors import PlaylistLoadError
 
 
@@ -61,6 +62,9 @@ class LiveRuntimeSettings:
     request_headers: Mapping[str, str] | None = None
     admission_policy: LiveAdmissionPolicy = field(
         default_factory=LiveAdmissionPolicy
+    )
+    variant_selection: VariantSelectionPolicy = field(
+        default_factory=VariantSelectionPolicy
     )
 
     def __post_init__(self) -> None:
@@ -97,6 +101,8 @@ class LiveRuntimeSettings:
             )
         if not isinstance(self.admission_policy, LiveAdmissionPolicy):
             raise TypeError("admission_policy must be a LiveAdmissionPolicy")
+        if not isinstance(self.variant_selection, VariantSelectionPolicy):
+            raise TypeError("variant_selection must be a VariantSelectionPolicy")
 
 
 class LiveMonitoringRuntime:
@@ -120,6 +126,7 @@ class LiveMonitoringRuntime:
             media_playlist_workers=self.settings.media_playlist_workers,
             request_headers=self.settings.request_headers,
             loader=build_monitoring_context,
+            variant_selection=self.settings.variant_selection,
         )
         generation_store = (
             state_store

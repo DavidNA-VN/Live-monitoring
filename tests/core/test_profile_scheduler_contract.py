@@ -9,6 +9,8 @@ from core.profile_worker import ProfileWorkerCoordinator
 from core.profile_scheduler import ProfileScheduler
 from core.analysis_profile import AnalysisResourceClass
 from core.segment_admission import (
+    AdmissionDrop,
+    AdmissionDropReason,
     AdmittedProfileSegment,
     ProfileSegmentIdentity,
     SegmentAdmissionQueue,
@@ -228,6 +230,87 @@ def test_scheduler_enters_catch_up_from_observed_queue_pressure():
         assert scheduler.admission_controller.mode is AdmissionMode.CATCH_UP
         assert stats.admission_mode == "catch_up"
         assert stats.admission_mode_transition_count == 1
+    finally:
+        scheduler.shutdown()
+
+
+def test_scheduler_protects_live_edge_after_sustained_hard_lag():
+    now = [0.0]
+    queue = SegmentAdmissionQueue(
+        max_items=20,
+        max_age_seconds=100,
+        clock=lambda: now[0],
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(sequence) for sequence in range(10, 16)],
+    )
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[FakeProfile()],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+        admission_queue=queue,
+        admission_policy=LiveAdmissionPolicy(
+            transition_cycles=1,
+            live_edge_retention_segments=2,
+        ),
+    )
+    now[0] = 13.0
+    try:
+        scheduler.observe_queue_pressure(
+            target_duration=2.0,
+            stats=LiveCycleStats(started_at=datetime.now(timezone.utc)),
+        )
+        stats = LiveCycleStats(started_at=datetime.now(timezone.utc))
+        scheduler.observe_queue_pressure(target_duration=2.0, stats=stats)
+
+        assert stats.admission_mode == "live_edge_protection"
+        assert stats.dropped_live_edge_work_count == 4
+        assert stats.coverage_gap_count == 1
+        assert stats.coverage_gap_segment_count == 4
+        assert stats.dropped_media_segment_count == 4
+        assert [item.identity.sequence for item in queue.snapshot()] == [14, 15]
+    finally:
+        scheduler.shutdown()
+
+
+def test_dropped_media_segment_count_deduplicates_profiles() -> None:
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+    )
+    base = dict(
+        variant_stable_id="variant-a",
+        timeline_generation=0,
+        discontinuity_sequence=0,
+        sequence=100,
+        media_revision="revision-a",
+    )
+    drops = tuple(
+        AdmissionDrop(
+            identity=ProfileSegmentIdentity(profile_name=profile, **base),
+            reason=AdmissionDropReason.LIVE_EDGE_PROTECTION,
+        )
+        for profile in ("video_realtime", "audio_realtime")
+    )
+    stats = LiveCycleStats(started_at=datetime.now(timezone.utc))
+    try:
+        scheduler._record_drops(stats, drops)
+        assert stats.coverage_gap_segment_count == 2
+        assert stats.dropped_media_segment_count == 1
     finally:
         scheduler.shutdown()
 

@@ -10,6 +10,8 @@ def test_admission_policy_has_production_safe_defaults() -> None:
     assert policy.startup_lookback_segments == 4
     assert policy.soft_lag_target_durations == 2.0
     assert policy.recovery_lag_target_durations == 1.5
+    assert policy.hard_lag_target_durations == 6.0
+    assert policy.live_edge_retention_segments == 2
     assert policy.transition_cycles == 3
 
 
@@ -28,6 +30,7 @@ def test_admission_policy_rejects_non_positive_lookback(lookback: int) -> None:
 def test_admission_modes_are_stable_contract_values() -> None:
     assert AdmissionMode.COVERAGE.value == "coverage"
     assert AdmissionMode.CATCH_UP.value == "catch_up"
+    assert AdmissionMode.LIVE_EDGE_PROTECTION.value == "live_edge_protection"
 
 
 def test_admission_policy_rejects_invalid_hysteresis() -> None:
@@ -35,4 +38,9 @@ def test_admission_policy_rejects_invalid_hysteresis() -> None:
         LiveAdmissionPolicy(
             soft_lag_target_durations=2.0,
             recovery_lag_target_durations=2.0,
+        )
+    with pytest.raises(ValueError, match="must be greater"):
+        LiveAdmissionPolicy(
+            soft_lag_target_durations=2.0,
+            hard_lag_target_durations=2.0,
         )

@@ -142,6 +142,7 @@ export class LifecycleController {
         }
 
         const currentStatus = statusData.status || 'RUNNING';
+        this.view.setRuntimeTelemetry(statusData);
 
         // Khởi động AlertClient và Status Polling trước và độc lập với MediaSession
         this.alertClient.start(streamId);
@@ -280,8 +281,13 @@ export class LifecycleController {
                 if (this.currentStreamId !== streamId) return;
                 if (res.ok && res.data) {
                     const status = res.data.status;
+                    this.view.setRuntimeTelemetry(res.data);
                     if (status === 'RUNNING' && this.state === 'RUNNING') {
-                        this.view.setSystemStatus('RUNNING', 'var(--success)');
+                        const degraded = res.data.health === 'DEGRADED';
+                        this.view.setSystemStatus(
+                            degraded ? 'DEGRADED' : 'RUNNING',
+                            degraded ? 'var(--warning)' : 'var(--success)'
+                        );
                     } else if (status === 'PAUSED' && this.state === 'PAUSED') {
                         this.view.setSystemStatus('PAUSED', 'var(--warning)');
                     } else if (status === 'FAILED') {

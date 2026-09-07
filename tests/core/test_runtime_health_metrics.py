@@ -75,6 +75,12 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         backpressure_deferred_work_count=3,
         dropped_work_count=1,
         dropped_capacity_work_count=1,
+        dropped_live_edge_work_count=2,
+        coverage_gap_count=1,
+        coverage_gap_segment_count=2,
+        dropped_media_segment_count=1,
+        active_media_processes=2,
+        max_media_processes=4,
         profile_metrics={
             "video_analysis_total": 9,
             "video_analysis_failure_total": 2,
@@ -105,11 +111,21 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert mapping["admission_mode_transitions"] == 1
     assert mapping["backpressure_deferred_work"] == 3
     assert mapping["dropped_capacity_work"] == 1
+    assert mapping["dropped_live_edge_work"] == 2
+    assert mapping["coverage_gaps"] == 1
+    assert mapping["coverage_gap_segments"] == 2
+    assert mapping["dropped_media_segments_total"] == 1
+    assert mapping["active_media_processes"] == 2
+    assert mapping["max_media_processes"] == 4
     increments = client.client.pipeline_instance.increments
     assert increments["video_analysis_total"] == 9
     assert increments["startup_segments_selected_total"] == 4
     assert increments["startup_segments_outside_scope_total"] == 2
     assert increments["admission_mode_transitions_total"] == 1
+    assert increments["dropped_capacity_work_total"] == 1
+    assert increments["dropped_live_edge_work_total"] == 2
+    assert increments["coverage_gap_total"] == 1
+    assert increments["coverage_gap_segment_total"] == 2
     assert increments["video_analysis_failure_total"] == 2
     assert increments["video_analysis_timeout_total"] == 1
     assert increments["video_freeze_interval_total"] == 4
@@ -129,4 +145,7 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert eval_call[8] == "channel-01"  # ARGV[4] stream_id
     assert eval_call[12] == runtime_health_event_id("storage-1")
     assert "storage-1" not in eval_call[12]
-    assert eval_call[15] == '{"reasons":"backpressure_deferred_work=3,dropped_work=1"}'
+    assert eval_call[15] == (
+        '{"reasons":"backpressure_deferred_work=3,'
+        'admission_mode=catch_up"}'
+    )

@@ -30,6 +30,12 @@ class LiveCycleStats:
     dropped_work_count: int = 0
     dropped_expired_work_count: int = 0
     dropped_capacity_work_count: int = 0
+    dropped_live_edge_work_count: int = 0
+    coverage_gap_count: int = 0
+    coverage_gap_segment_count: int = 0
+    dropped_media_segment_count: int = 0
+    active_media_processes: int = 0
+    max_media_processes: int = 0
 
     playlist_fetch_latency_seconds: float = 0.0
     playlist_staleness_seconds: float = 0.0

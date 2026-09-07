@@ -58,3 +58,34 @@ def test_missing_target_duration_does_not_change_mode() -> None:
         )
 
     assert controller.mode is AdmissionMode.COVERAGE
+
+
+def test_hard_lag_enters_protection_then_recovers_via_catch_up() -> None:
+    controller = _controller()
+    for _ in range(3):
+        controller.observe(queue_lag_seconds=5.0, target_duration=2.0)
+    for _ in range(2):
+        assert (
+            controller.observe(queue_lag_seconds=13.0, target_duration=2.0)
+            is None
+        )
+    transition = controller.observe(
+        queue_lag_seconds=13.0,
+        target_duration=2.0,
+    )
+
+    assert transition is not None
+    assert transition.current is AdmissionMode.LIVE_EDGE_PROTECTION
+
+    for _ in range(2):
+        assert (
+            controller.observe(queue_lag_seconds=3.0, target_duration=2.0)
+            is None
+        )
+    transition = controller.observe(
+        queue_lag_seconds=3.0,
+        target_duration=2.0,
+    )
+
+    assert transition is not None
+    assert transition.current is AdmissionMode.CATCH_UP

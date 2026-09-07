@@ -15,6 +15,8 @@ from playlist.master_parser import (
 from playlist.media_parser import (
     parse_media_playlist,
 )
+from models.variant_selection import VariantSelectionPolicy
+from core.variant_selector import select_variants
 
 
 @dataclass
@@ -70,6 +72,7 @@ def build_monitoring_context(
     playlist_timeout: float = 5.0,
     request_headers: Mapping[str, str] | None = None,
     media_playlist_workers: int = 4,
+    variant_selection: VariantSelectionPolicy | None = None,
 ) -> MonitoringContext:
 
     if media_playlist_workers <= 0:
@@ -83,6 +86,10 @@ def build_monitoring_context(
         master_url,
         timeout=playlist_timeout,
         request_headers=request_headers,
+    )
+    variants = select_variants(
+        variants,
+        variant_selection or VariantSelectionPolicy(),
     )
 
     snapshots_by_variant: dict[

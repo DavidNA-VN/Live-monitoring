@@ -43,5 +43,24 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
     },
     "observed_at": {"type": "string", "format": "date-time"}
+    ,
+    "admission_mode": {
+      "enum": ["coverage", "catch_up", "live_edge_protection"],
+      "default": "coverage"
+    },
+    "startup_segments_outside_scope": {"type": "integer", "minimum": 0, "default": 0},
+    "dropped_expired_work": {"type": "integer", "minimum": 0, "default": 0},
+    "dropped_capacity_work": {"type": "integer", "minimum": 0, "default": 0},
+    "dropped_live_edge_work": {"type": "integer", "minimum": 0, "default": 0},
+    "coverage_gap_count": {"type": "integer", "minimum": 0, "default": 0},
+    "coverage_gap_segment_count": {"type": "integer", "minimum": 0, "default": 0},
+    "dropped_media_segment_count": {"type": "integer", "minimum": 0, "default": 0},
+    "profile_analysis_total": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "default": {}
+    },
+    "active_media_processes": {"type": "integer", "minimum": 0, "default": 0},
+    "max_media_processes": {"type": "integer", "minimum": 0, "default": 0}
   }
 }

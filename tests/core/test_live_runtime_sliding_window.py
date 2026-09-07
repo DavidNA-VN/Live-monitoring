@@ -50,6 +50,11 @@ class RejectOnceExecutor(ImmediateExecutor):
         return super().try_submit(function, *args, **kwargs)
 
 
+class RejectAllExecutor(ImmediateExecutor):
+    def try_submit(self, function, *args, **kwargs):
+        return None
+
+
 class FakeRedisPipeline:
     def delete(self, *_args, **_kwargs):
         return self
@@ -611,3 +616,41 @@ def test_batch_limit_yields_between_large_variant_backlogs(monkeypatch):
     scheduler.dispatch_pending(stats=stats)
 
     assert processor.processed == [100, 101, 102]
+
+
+def test_sustained_overload_protects_live_edge_without_processing_drops(
+    monkeypatch,
+):
+    snapshots = [
+        make_snapshot(
+            list(range(sequence - 3, sequence + 1)),
+            observed_at=observed_time(index * 6),
+        )
+        for index, sequence in enumerate(range(103, 110))
+    ]
+    processor = FakeProcessor()
+    runtime = make_runtime(
+        monkeypatch,
+        snapshots,
+        processor,
+        FakeStateStore(),
+    )
+    scheduler = runtime.profile_scheduler
+    scheduler.executor = RejectAllExecutor()
+    now = [0.0]
+    scheduler.admission_queue.clock = lambda: now[0]
+
+    observed_stats = []
+    for index in range(len(snapshots)):
+        now[0] = index * 13.0
+        observed_stats.append(runtime.run_cycle())
+
+    final = observed_stats[-1]
+    assert final.admission_mode == "live_edge_protection"
+    assert final.dropped_live_edge_work_count > 0
+    assert final.coverage_gap_count > 0
+    assert processor.processed == []
+    assert [
+        item.identity.sequence
+        for item in scheduler.admission_queue.snapshot()
+    ] == [108, 109]

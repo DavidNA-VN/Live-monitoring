@@ -74,6 +74,10 @@ def test_live_entrypoint_exposes_startup_admission_policy():
             "3",
             "--catch-up-recovery-lag-segments",
             "1",
+            "--live-edge-hard-lag-segments",
+            "8",
+            "--live-edge-retention-segments",
+            "3",
             "--catch-up-transition-cycles",
             "4",
         ]
@@ -83,7 +87,28 @@ def test_live_entrypoint_exposes_startup_admission_policy():
     assert args.startup_lookback_segments == 7
     assert args.catch_up_soft_lag_segments == 3.0
     assert args.catch_up_recovery_lag_segments == 1.0
+    assert args.live_edge_hard_lag_segments == 8.0
+    assert args.live_edge_retention_segments == 3
     assert args.catch_up_transition_cycles == 4
+
+
+def test_live_entrypoint_exposes_explicit_variant_selection():
+    module = importlib.import_module("live_main")
+
+    args = module.parse_args(
+        [
+            "--command-worker",
+            "--variant-selection",
+            "explicit",
+            "--variant-id",
+            "720p",
+            "--variant-id",
+            "stable-1080",
+        ]
+    )
+
+    assert args.variant_selection == "explicit"
+    assert args.variant_id == ["720p", "stable-1080"]
 
 
 def test_live_entrypoint_exposes_opt_in_freeze_options():

@@ -154,6 +154,16 @@ class RedisRuntimeHealthReporter:
             "dropped_capacity_work": (
                 stats.dropped_capacity_work_count
             ),
+            "dropped_live_edge_work": (
+                stats.dropped_live_edge_work_count
+            ),
+            "coverage_gaps": stats.coverage_gap_count,
+            "coverage_gap_segments": stats.coverage_gap_segment_count,
+            "dropped_media_segments_total": (
+                stats.dropped_media_segment_count
+            ),
+            "active_media_processes": stats.active_media_processes,
+            "max_media_processes": stats.max_media_processes,
             "playlist_fetch_latency_seconds": (
                 f"{stats.playlist_fetch_latency_seconds:.6f}"
             ),
@@ -186,6 +196,19 @@ class RedisRuntimeHealthReporter:
                 ),
                 "startup_segments_outside_scope_total": (
                     stats.startup_segments_outside_scope
+                ),
+                "dropped_expired_work_total": (
+                    stats.dropped_expired_work_count
+                ),
+                "dropped_capacity_work_total": (
+                    stats.dropped_capacity_work_count
+                ),
+                "dropped_live_edge_work_total": (
+                    stats.dropped_live_edge_work_count
+                ),
+                "coverage_gap_total": stats.coverage_gap_count,
+                "coverage_gap_segment_total": (
+                    stats.coverage_gap_segment_count
                 ),
                 "audio_analysis_total": stats.audio_analysis_total,
                 "audio_analysis_failure_total": (
@@ -327,11 +350,8 @@ class RedisRuntimeHealthReporter:
                 )
             )
 
-        if stats.dropped_work_count > 0:
-            reasons.append(
-                "dropped_work="
-                f"{stats.dropped_work_count}"
-            )
+        if stats.admission_mode != "coverage":
+            reasons.append(f"admission_mode={stats.admission_mode}")
 
         if stats.successful_snapshots == 0:
             reasons.append(
