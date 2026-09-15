@@ -97,6 +97,60 @@ def test_inflight_item_is_not_evicted_by_capacity():
     assert result.drops[0].identity.sequence == 101
 
 
+def test_pending_metrics_exclude_inflight_work():
+    clock = FakeClock()
+    queue = SegmentAdmissionQueue(
+        max_items=10,
+        max_age_seconds=30,
+        clock=clock,
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(100)],
+    )
+    first = queue.snapshot()[0].identity
+    queue.protect([first])
+    clock.advance(5)
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(101)],
+    )
+    clock.advance(2)
+
+    pressure = queue.pressure_snapshot()
+    assert pressure.retained_depth == 2
+    assert pressure.pending_depth == 1
+    assert pressure.in_flight_depth == 1
+    assert pressure.oldest_retained_age_seconds == 7
+    assert pressure.oldest_pending_age_seconds == 2
+
+    queue.protect([queue.snapshot()[1].identity])
+
+    assert queue.pending_depth == 0
+    assert queue.in_flight_depth == 2
+    assert queue.oldest_pending_age_seconds == 0
+
+
+def test_acknowledge_clears_inflight_membership():
+    queue = SegmentAdmissionQueue(
+        max_items=10,
+        max_age_seconds=30,
+        clock=FakeClock(),
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(100)],
+    )
+    identity = queue.snapshot()[0].identity
+    queue.protect([identity])
+
+    queue.acknowledge([identity])
+
+    assert queue.depth == 0
+    assert queue.pending_depth == 0
+    assert queue.in_flight_depth == 0
+
+
 def test_acknowledged_item_is_suppressed_while_playlist_retains_it():
     clock = FakeClock()
     queue = SegmentAdmissionQueue(
@@ -146,3 +200,31 @@ def test_live_edge_protection_keeps_newest_and_inflight_work():
         (100, 100),
         (102, 103),
     ]
+
+
+def test_live_edge_retention_quota_counts_pending_work_only():
+    queue = SegmentAdmissionQueue(
+        max_items=20,
+        max_age_seconds=30,
+        clock=FakeClock(),
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(sequence) for sequence in range(100, 106)],
+    )
+    newest_inflight = [
+        item.identity
+        for item in queue.snapshot()
+        if item.identity.sequence in {104, 105}
+    ]
+    queue.protect(newest_inflight)
+
+    drops = queue.protect_live_edge(retain_segments=2)
+
+    assert [item.identity.sequence for item in queue.snapshot()] == [
+        102,
+        103,
+        104,
+        105,
+    ]
+    assert [drop.identity.sequence for drop in drops] == [100, 101]

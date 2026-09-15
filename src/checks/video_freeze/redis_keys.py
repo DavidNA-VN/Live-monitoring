@@ -34,6 +34,9 @@ class VideoFreezeRedisKeys:
     def event_lock(self, stream_id: str, variant_stable_id: str) -> str:
         return f"{self._variant(stream_id, variant_stable_id)}:event-lock"
 
+    def alert_recovery(self, stream_id: str, variant_stable_id: str) -> str:
+        return f"{self._variant(stream_id, variant_stable_id)}:alert-recovery"
+
     def commit_marker(
         self,
         stream_id: str,

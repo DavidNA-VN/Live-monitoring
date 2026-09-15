@@ -50,6 +50,12 @@ class BlackAlertPublisher:
             "timeline_generation": str(event.timeline_generation),
             "start_media_revision": event.start_media_revision,
             "last_media_revision": event.last_media_revision,
+            "start_segment_uri": event.start_segment_uri,
+            "end_segment_uri": event.end_segment_uri,
+            "affected_segment_count": str(len(event.affected_segments)),
+            "start_offset_seconds": f"{event.start_offset:.6f}",
+            "end_offset_seconds": f"{event.end_offset:.6f}",
+            "coverage_complete": str(event.coverage_complete).lower(),
         }
         envelope = AlertEnvelope(
             alert_id=deterministic_alert_id(
@@ -94,6 +100,12 @@ class BlackAlertPublisher:
             "occurrences": str(alert.occurrences),
             "total_black_duration": f"{alert.total_black_duration:.6f}",
             "latest_event_id": alert.latest_event_id,
+            "start_sequence": str(alert.start_sequence),
+            "end_sequence": str(alert.end_sequence),
+            "start_segment_uri": alert.start_segment_uri,
+            "end_segment_uri": alert.end_segment_uri,
+            "affected_segment_count": str(alert.affected_segment_count),
+            "coverage_complete": "false",
         }
         if alert.state.value != "RESOLVED":
             attributes["window_seconds"] = str(policy.repeated_window)

@@ -13,6 +13,7 @@ from core.redis_keys import ProcessingRedisKeys
 from core.redis_scripts import (
     ADVANCE_TIMELINE_GENERATION,
     COMPLETE_SEGMENT,
+    RELINQUISH_SEGMENT_CLAIM,
     RELEASE_OWNED_LOCK,
     RENEW_OWNED_LOCK,
 )
@@ -444,6 +445,36 @@ class RedisSegmentStateStore:
             lock_key=lock_key,
             lease_token=lease_token,
         )
+
+    def relinquish(
+        self,
+        claim: SegmentClaim,
+        reason: str,
+    ) -> None:
+        """Return an unused ordered claim without consuming a retry attempt."""
+        lease_token = self._require_token(claim)
+        lock_key = self.processing_keys.segment_lock(claim.identity)
+        state_key = self.processing_keys.segment_state(claim.identity)
+        try:
+            released = self.redis.eval(
+                RELINQUISH_SEGMENT_CLAIM,
+                2,
+                lock_key,
+                state_key,
+                lease_token,
+                SegmentProcessingStatus.FAILED_RETRYABLE.value,
+                self._now(),
+                reason,
+                self.state_ttl_seconds,
+            )
+        except redis.RedisError as exc:
+            raise RedisUnavailableError(
+                f"Unable to relinquish segment claim: {exc}"
+            ) from exc
+        if int(released or 0) != 1:
+            raise SegmentLeaseLostError(
+                "Segment processing claim could not be relinquished."
+            )
 
     def _complete(
         self,

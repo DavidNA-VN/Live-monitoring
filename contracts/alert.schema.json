@@ -28,8 +28,9 @@
         "REPEATED_BLACK_SCREEN",
         "AUDIO_LOSS",
         "VIDEO_FREEZE",
-        "REPEATED_VIDEO_FREEZE",
-        "RUNTIME_HEALTH"
+          "REPEATED_VIDEO_FREEZE",
+          "MACROBLOCKING",
+          "RUNTIME_HEALTH"
       ]
     },
     "state": {

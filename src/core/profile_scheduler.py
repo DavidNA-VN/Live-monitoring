@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterable, Mapping
 from threading import Lock
+from time import monotonic
 
 from core.analysis_profile import AnalysisProfile, AnalysisResourceClass
 from core.bounded_executor import BoundedExecutor
@@ -39,6 +40,21 @@ from models.stream import StreamIdentity
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_BATCH_SIZE_BY_RESOURCE = {
+    AnalysisResourceClass.METADATA: 20,
+    AnalysisResourceClass.VIDEO_DECODE: 2,
+    AnalysisResourceClass.AUDIO_DECODE: 4,
+    AnalysisResourceClass.EXPENSIVE: 1,
+}
+
+DEFAULT_PARALLEL_ANALYSIS_BY_RESOURCE = {
+    AnalysisResourceClass.METADATA: 1,
+    AnalysisResourceClass.VIDEO_DECODE: 1,
+    AnalysisResourceClass.AUDIO_DECODE: 2,
+    AnalysisResourceClass.EXPENSIVE: 1,
+}
+
+
 class ProfileScheduler:
     """Plans admitted profile work and dispatches it to resource pools."""
 
@@ -57,6 +73,14 @@ class ProfileScheduler:
         max_admitted_work: int = 2048,
         max_work_age_seconds: float = 120.0,
         max_segments_per_batch: int = 20,
+        batch_size_by_resource: Mapping[
+            AnalysisResourceClass,
+            int,
+        ] | None = None,
+        parallel_analysis_by_resource: Mapping[
+            AnalysisResourceClass,
+            int,
+        ] | None = None,
         admission_queue: AdmissionQueue | None = None,
         metrics: RuntimeMetricCollector | None = None,
         service_media_process_gate: ProcessGate | None = None,
@@ -103,6 +127,29 @@ class ProfileScheduler:
             admission_policy or LiveAdmissionPolicy()
         )
         self.max_segments_per_batch = max_segments_per_batch
+        configured_batch_sizes = dict(
+            batch_size_by_resource or DEFAULT_BATCH_SIZE_BY_RESOURCE
+        )
+        for resource_class, size in configured_batch_sizes.items():
+            if not isinstance(resource_class, AnalysisResourceClass):
+                raise ValueError("batch size keys must be resource classes")
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                raise ValueError("resource batch sizes must be positive integers")
+        self.batch_size_by_resource = configured_batch_sizes
+        configured_parallelism = dict(
+            parallel_analysis_by_resource
+            or DEFAULT_PARALLEL_ANALYSIS_BY_RESOURCE
+        )
+        for resource_class, size in configured_parallelism.items():
+            if not isinstance(resource_class, AnalysisResourceClass):
+                raise ValueError(
+                    "parallel analysis keys must be resource classes"
+                )
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                raise ValueError(
+                    "parallel analysis limits must be positive integers"
+                )
+        self.parallel_analysis_by_resource = configured_parallelism
         self.media_process_gate = process_gate(
             per_stream_limit=max_concurrent_media_processes,
             service_gate=service_media_process_gate,
@@ -125,7 +172,10 @@ class ProfileScheduler:
         target_duration: float | None,
         stats: LiveCycleStats,
     ) -> None:
-        queue_lag = self.admission_queue.oldest_age_seconds
+        queue_lag = (
+            self.admission_queue.pressure_snapshot()
+            .oldest_pending_age_seconds
+        )
         transition = self.admission_controller.observe(
             queue_lag_seconds=queue_lag,
             target_duration=target_duration,
@@ -305,12 +355,21 @@ class ProfileScheduler:
                 completed.append(item.identity)
         self.admission_queue.acknowledge(completed)
         if work:
+            batch_limit = self._batch_limit(profile)
             self._submit_batch(
                 profile=profile,
                 variant_stable_id=variant_stable_id,
-                work=work[: self.max_segments_per_batch],
+                work=work[:batch_limit],
                 stats=stats,
             )
+
+    def _batch_limit(self, profile: AnalysisProfile) -> int:
+        resource_class = self.resource_class_by_profile[profile.name]
+        resource_limit = self.batch_size_by_resource.get(
+            resource_class,
+            self.max_segments_per_batch,
+        )
+        return min(self.max_segments_per_batch, resource_limit)
 
     def _submit_batch(
         self,
@@ -334,6 +393,7 @@ class ProfileScheduler:
             work,
             batch_key,
             admission_ids,
+            monotonic(),
         )
         work_count = sum(len(item.processors) for item in work)
         if future is None:
@@ -342,6 +402,10 @@ class ProfileScheduler:
             stats.backpressure_deferred_work_count += work_count
             return
         stats.scheduled_work_count += work_count
+        self.worker.metrics.record_work_submitted(profile.name, len(work))
+        self.worker.metrics.record_work_submitted(
+            self._resource_metric_name(profile), len(work)
+        )
 
     def _process_batch(
         self,
@@ -349,12 +413,47 @@ class ProfileScheduler:
         work: list[ProfileSegmentWork],
         batch_key: tuple[str, str],
         admission_ids: tuple[ProfileSegmentIdentity, ...],
+        submitted_at: float,
     ) -> None:
         try:
-            self.worker.process_batch(profile, work)
+            self.worker.metrics.record_work_started(
+                profile.name,
+                count=len(work),
+                executor_wait_seconds=max(0.0, monotonic() - submitted_at),
+            )
+            self.worker.metrics.record_work_started(
+                self._resource_metric_name(profile),
+                count=len(work),
+                executor_wait_seconds=max(0.0, monotonic() - submitted_at),
+            )
+            self.worker.process_batch(
+                profile,
+                work,
+                max_parallel_analysis=self._parallel_analysis_limit(profile),
+                on_item_completed=lambda identity: (
+                    self.admission_queue.acknowledge((identity,))
+                ),
+            )
         finally:
             self.admission_queue.release(admission_ids)
             self._release_batch(batch_key)
+
+    def _parallel_analysis_limit(self, profile: AnalysisProfile) -> int:
+        resource_class = self.resource_class_by_profile[profile.name]
+        configured = self.parallel_analysis_by_resource.get(
+            resource_class,
+            1,
+        )
+        return min(self._batch_limit(profile), configured)
+
+    @staticmethod
+    def _resource_metric_name(profile: AnalysisProfile) -> str:
+        resource_class = getattr(
+            profile,
+            "resource_class",
+            AnalysisResourceClass.VIDEO_DECODE,
+        )
+        return f"resource_{AnalysisResourceClass(resource_class).value}"
 
     def _reserve_batch(self, batch_key: tuple[str, str]) -> bool:
         with self.batch_lock:
@@ -451,10 +550,15 @@ class ProfileScheduler:
         )
 
     def _record_queue_metrics(self, stats: LiveCycleStats) -> None:
-        stats.queue_depth = self.admission_queue.depth
-        stats.queue_lag_seconds = self.admission_queue.oldest_age_seconds
+        pressure = self.admission_queue.pressure_snapshot()
+        stats.queue_depth = pressure.pending_depth
+        stats.pending_work_count = pressure.pending_depth
+        stats.in_flight_work_count = pressure.in_flight_depth
+        stats.retained_work_count = pressure.retained_depth
+        stats.queue_lag_seconds = pressure.oldest_pending_age_seconds
         snapshot = getattr(self.media_process_gate, "snapshot", None)
         if callable(snapshot):
             capacity = snapshot()
             stats.active_media_processes = capacity.active
             stats.max_media_processes = capacity.maximum
+            stats.peak_active_media_processes = capacity.peak_active

@@ -1,7 +1,12 @@
 import json
 from datetime import datetime
 
-from models.black_live import BlackEventStatus, BlackLiveEvent
+from models.black_live import (
+    BlackAlertType,
+    BlackAlertRecoveryState,
+    BlackEventStatus,
+    BlackLiveEvent,
+)
 
 
 class BlackEventCodec:
@@ -41,6 +46,13 @@ class BlackEventCodec:
                 "status": event.status.value,
                 "long_alert_sent": event.long_alert_sent,
                 "resolution_reason": event.resolution_reason,
+                "reference_segment_duration": (
+                    event.reference_segment_duration
+                ),
+                "detection_closed": event.detection_closed,
+                "start_segment_uri": event.start_segment_uri,
+                "end_segment_uri": event.end_segment_uri,
+                "coverage_complete": event.coverage_complete,
             },
             separators=(",", ":"),
         )
@@ -48,6 +60,12 @@ class BlackEventCodec:
     @staticmethod
     def decode(raw: str) -> BlackLiveEvent:
         data = json.loads(raw)
+        detection_closed = data.get("detection_closed")
+        if detection_closed is not None and not isinstance(
+            detection_closed, bool
+        ):
+            raise ValueError("detection_closed must be a JSON boolean")
+        status = BlackEventStatus(data["status"])
         return BlackLiveEvent(
             event_id=data["event_id"],
             stream_id=data["stream_id"],
@@ -84,7 +102,75 @@ class BlackEventCodec:
             affected_segments=list(
                 data["affected_segments"]
             ),
-            status=BlackEventStatus(data["status"]),
+            status=status,
             long_alert_sent=bool(data["long_alert_sent"]),
             resolution_reason=data.get("resolution_reason"),
+            reference_segment_duration=float(
+                data.get(
+                    "reference_segment_duration",
+                    data.get("last_segment_duration", 0.0),
+                )
+            ),
+            detection_closed=(
+                detection_closed
+                if detection_closed is not None
+                else status is BlackEventStatus.RESOLVED
+            ),
+            start_segment_uri=str(data.get("start_segment_uri", "")),
+            end_segment_uri=str(data.get("end_segment_uri", "")),
+            coverage_complete=data.get("coverage_complete", True) is True,
+        )
+
+
+class BlackAlertRecoveryCodec:
+    @staticmethod
+    def encode(state: BlackAlertRecoveryState) -> str:
+        return json.dumps(
+            {
+                "alert_event_id": state.alert_event_id,
+                "alert_type": state.alert_type.value,
+                "recovery_pending": state.recovery_pending,
+                "healthy_segments_observed": state.healthy_segments_observed,
+                "last_observed_sequence": state.last_observed_sequence,
+                "timeline_generation": state.timeline_generation,
+                "discontinuity_sequence": state.discontinuity_sequence,
+            },
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def decode(raw: str) -> BlackAlertRecoveryState:
+        data = json.loads(raw)
+        recovery_pending = data.get("recovery_pending", False)
+        if not isinstance(recovery_pending, bool):
+            raise ValueError("recovery_pending must be a JSON boolean")
+        integer_fields = {
+            "healthy_segments_observed": data.get(
+                "healthy_segments_observed", 0
+            ),
+            "last_observed_sequence": data.get(
+                "last_observed_sequence", -1
+            ),
+            "timeline_generation": data.get("timeline_generation", 0),
+            "discontinuity_sequence": data.get(
+                "discontinuity_sequence", 0
+            ),
+        }
+        for name, value in integer_fields.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be a JSON integer")
+        return BlackAlertRecoveryState(
+            alert_event_id=data["alert_event_id"],
+            alert_type=BlackAlertType(data["alert_type"]),
+            recovery_pending=recovery_pending,
+            healthy_segments_observed=integer_fields[
+                "healthy_segments_observed"
+            ],
+            last_observed_sequence=integer_fields[
+                "last_observed_sequence"
+            ],
+            timeline_generation=integer_fields["timeline_generation"],
+            discontinuity_sequence=integer_fields[
+                "discontinuity_sequence"
+            ],
         )

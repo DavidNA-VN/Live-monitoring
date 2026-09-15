@@ -13,15 +13,15 @@ def test_fixture_matrix_covers_business_boundaries_and_cross_segment_case():
     by_name = {item.name: item for item in FIXTURES}
 
     assert by_name["freeze_2_9s"].expected_public_severity is None
-    assert by_name["freeze_3_2s"].expected_public_severity == "WARNING"
-    assert by_name["freeze_5_2s"].expected_public_severity == "ALERT"
-    assert by_name["freeze_5_2s"].expected_event_type == "VIDEO_FREEZE"
+    assert by_name["freeze_59s"].expected_public_severity is None
+    assert by_name["freeze_60s"].expected_public_severity == "ALERT"
+    assert by_name["freeze_60s"].expected_event_type == "VIDEO_FREEZE"
     cross = by_name["freeze_cross_three_segments"].freezes[0]
     assert cross.start < 2.0
     assert cross.end > 6.0
-    assert len(by_name["three_warning_freezes"].freezes) == 3
+    assert len(by_name["three_short_freezes"].freezes) == 3
     assert (
-        by_name["three_warning_freezes"].expected_event_type
+        by_name["three_short_freezes"].expected_event_type
         == "REPEATED_VIDEO_FREEZE"
     )
 

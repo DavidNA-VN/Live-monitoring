@@ -45,6 +45,11 @@ def parse_args(argv=None):
         help="Enable video-freeze monitoring",
     )
     parser.add_argument(
+        "--enable-macroblocking",
+        action="store_true",
+        help="Enable macroblocking monitoring",
+    )
+    parser.add_argument(
         "--freeze-noise-db",
         type=float,
         default=-60.0,
@@ -60,13 +65,13 @@ def parse_args(argv=None):
         "--freeze-warning-duration",
         type=float,
         default=3.0,
-        help="Video-freeze warning duration in seconds",
+        help="Deprecated compatibility field; repeated rule uses segment duration",
     )
     parser.add_argument(
         "--freeze-alert-duration",
         type=float,
-        default=5.0,
-        help="Video-freeze alert duration in seconds",
+        default=60.0,
+        help="Continuous video-freeze alert duration in seconds",
     )
     parser.add_argument(
         "--silence-threshold-dbfs",
@@ -155,7 +160,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--variant-selection",
         choices=[mode.value for mode in VariantSelectionMode],
-        default=VariantSelectionMode.ALL.value,
+        default=VariantSelectionMode.HIGHEST_QUALITY.value,
         help="Variant monitoring policy",
     )
     parser.add_argument(
@@ -321,6 +326,7 @@ def main():
                     stream_id=args.stream_id,
                     black_screen_enabled=not args.disable_black_screen,
                     video_freeze_enabled=args.enable_video_freeze,
+                    macroblocking_enabled=args.enable_macroblocking,
                     freeze_noise_db=args.freeze_noise_db,
                     freeze_detector_minimum_duration=(
                         args.freeze_detector_minimum_duration

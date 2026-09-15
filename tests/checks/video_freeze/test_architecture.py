@@ -19,7 +19,11 @@ def _imports(path: Path) -> set[str]:
 
 
 def test_video_freeze_domain_does_not_depend_on_other_diseases():
-    forbidden = ("checks.black_screen", "checks.audio_loss")
+    forbidden = (
+        "checks.black_screen",
+        "checks.audio_loss",
+        "profiles.video_realtime",
+    )
     freeze_root = PROJECT_ROOT / "src" / "checks" / "video_freeze"
 
     violations = {

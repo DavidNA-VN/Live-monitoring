@@ -13,15 +13,22 @@
 | Case | Timeline | Checks khi test rieng | Expected |
 |---|---|---|---|
 | `healthy` | 24s motion + audible | all enabled | no content alert |
-| `black_screen` | black 6-8, 14-16, 22-24, 30-38s | black on, freeze off | repeated short-black + direct long-black alert |
-| `audio_silence` | silence 4-39s, audio track present | audio-loss on | `continuous_silence`, then resolved |
-| `audio_missing` | 40s without audio elementary stream | audio-loss on | `audio_stream_missing` after 30s |
-| `video_freeze` | 2.9s, three 3.2s and one 5.2s freezes | freeze on, black off | boundary, direct alert and repeated warning |
-| `combined` | black + freeze + 35s silence | all enabled | independent alerts through shared video profile |
+| `black_screen` | black 6-8.2, 14-16.2, 22-24.2, 30-92s | black on, freeze off | repeated OPEN/RESOLVED + continuous OPEN/RESOLVED on highest variant |
+| `audio_silence` | silence 4-39s, audio track present | audio-loss on | `continuous_silence` OPEN, then RESOLVED |
+| `audio_missing` | 40s without audio elementary stream | audio-loss on | `audio_stream_missing` OPEN after 30s; remains open |
+| `video_freeze` | three 4s freezes, then one 62s freeze | freeze on, black off | repeated OPEN/RESOLVED + continuous OPEN/RESOLVED per variant |
+| `macroblocking` | 40% pixelated region from 4-18s | macroblocking on, other checks off | one OPEN and one RESOLVED on highest variant |
+| `combined` | repeated black, repeated freeze, 35s silence, 14s macroblocking | all enabled | four independent OPEN/RESOLVED lifecycles |
 
-Black frames are static. Khi freeze cung enable, mot black range dai co the thoa ca
-hai detector va phat hai event doc lap. Day la expected baseline behavior, khong
-phai duplicate alert.
+Black frames are static, nhung shared video profile loai black overlap khoi
+effective freeze. Vi vay cung mot khoang black khong duoc phat dong thoi thanh
+VIDEO_FREEZE.
+
+Fixture `black_screen` dung segment 2s. Ba event ngan dai 2.2s de co sampling
+margin va chac chan dat dieu kien `>= one segment`; chung duoc dua vao repeated
+counter sau khi dong. Event 30-92s dai 62s, vi vay dat
+continuous threshold 60s khi dang dien ra. Segment healthy day du ke tiep xac
+nhan `RESOLVED`; `expected.json` la expected-output machine-readable chinh thuc.
 
 ## Generate fixtures
 
@@ -39,6 +46,19 @@ python scripts/generate_monitoring_test_cases.py --reset --case healthy --case v
 
 `--reset` chi xoa directory co ownership marker cua generator.
 
+## Automated production verification
+
+Khi Redis va `scripts/serve_hls.py` dang chay:
+
+```powershell
+python scripts/verify_monitoring_test_cases.py --speed 1
+```
+
+Runner khoi dong `live_main.py` cho tung case, dung Redis namespace rieng, chi
+monitor highest-quality variant, va so sanh content alert voi `expected.json`.
+Missing, unexpected, duplicate alert hoac dropped media segment deu lam command
+tra exit code `2`.
+
 ## Start live environment
 
 Terminal 1, HTTP server:
@@ -51,6 +71,12 @@ Terminal 2, publisher vi du:
 
 ```powershell
 python scripts/publish_monitoring_test_stream.py video_freeze --reset
+```
+
+Macroblocking:
+
+```powershell
+python scripts/publish_monitoring_test_stream.py macroblocking --reset
 ```
 
 URL:
@@ -93,5 +119,6 @@ http://127.0.0.1:8000/live_cases/black_screen/master.m3u8
 http://127.0.0.1:8000/live_cases/audio_silence/master.m3u8
 http://127.0.0.1:8000/live_cases/audio_missing/master.m3u8
 http://127.0.0.1:8000/live_cases/video_freeze/master.m3u8
+http://127.0.0.1:8000/live_cases/macroblocking/master.m3u8
 http://127.0.0.1:8000/live_cases/combined/master.m3u8
 ```

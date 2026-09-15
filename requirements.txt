@@ -6,6 +6,7 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.18
 m3u8==6.0.0
+numpy==2.5.3
 pydantic==2.13.4
 redis==8.1.0
 uvicorn==0.52.4

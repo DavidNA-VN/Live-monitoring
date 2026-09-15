@@ -99,6 +99,11 @@ def store(client, keys, *, policy=None):
     )
 
 
+def legacy_fast_policy():
+    """Keep infrastructure tests fast without changing production defaults."""
+    return BlackScreenAlertPolicy(direct_alert_duration=3.0)
+
+
 def alerts(client, keys):
     return [
         fields
@@ -115,7 +120,7 @@ def test_open_idempotency_and_restart_resolution(redis_context):
         segment,
         BlackInterval(start=0.0, end=6.0),
     )
-    first_worker = store(client, keys)
+    first_worker = store(client, keys, policy=legacy_fast_policy())
 
     first_worker.apply(segment=segment, result=detection)
     first_worker.apply(segment=segment, result=detection)
@@ -123,7 +128,7 @@ def test_open_idempotency_and_restart_resolution(redis_context):
     emitted = alerts(client, keys)
     assert [item["state"] for item in emitted] == ["OPEN"]
 
-    restarted_worker = store(client, keys)
+    restarted_worker = store(client, keys, policy=legacy_fast_policy())
     next_segment = make_segment(11)
     restarted_worker.apply(
         segment=next_segment,
@@ -169,7 +174,7 @@ def test_timeline_reset_reusing_sequence_creates_distinct_black_event(
     redis_context,
 ):
     client, keys = redis_context
-    event_store = store(client, keys)
+    event_store = store(client, keys, policy=legacy_fast_policy())
     old = make_segment(100)
     old.media_revision = "same-manifest-media"
     current = make_segment(100)
@@ -191,8 +196,9 @@ def test_timeline_reset_reusing_sequence_creates_distinct_black_event(
         "RESOLVED",
         "OPEN",
     ]
-    assert emitted[0]["event_id"] != emitted[2]["event_id"]
+    assert emitted[1]["reason"] == "timeline_discontinued"
     assert emitted[1]["event_id"] == emitted[0]["event_id"]
+    assert emitted[0]["event_id"] != emitted[2]["event_id"]
 
 
 def test_two_workers_do_not_emit_duplicate_open(redis_context):
@@ -202,7 +208,10 @@ def test_two_workers_do_not_emit_duplicate_open(redis_context):
         segment,
         BlackInterval(start=0.0, end=6.0),
     )
-    workers = [store(client, keys), store(client, keys)]
+    workers = [
+        store(client, keys, policy=legacy_fast_policy()),
+        store(client, keys, policy=legacy_fast_policy()),
+    ]
     barrier = Barrier(2)
 
     def apply(worker):
@@ -227,7 +236,7 @@ def test_two_workers_do_not_emit_duplicate_open(redis_context):
 
 def test_canonical_events_are_stored_inside_variant_keyspace(redis_context):
     client, keys = redis_context
-    event_store = store(client, keys)
+    event_store = store(client, keys, policy=legacy_fast_policy())
     first = make_segment(10, variant_id="720p")
     second = make_segment(
         10,
@@ -287,8 +296,9 @@ def test_threshold_reached_on_resolution_emits_open_then_resolved(
 ):
     client, keys = redis_context
     segment = make_segment(10)
+    event_store = store(client, keys, policy=legacy_fast_policy())
 
-    store(client, keys).apply(
+    event_store.apply(
         segment=segment,
         result=result(
             segment,
@@ -297,30 +307,36 @@ def test_threshold_reached_on_resolution_emits_open_then_resolved(
     )
 
     emitted = alerts(client, keys)
+    # Closed event does NOT emit RESOLVED immediately; it enters recovery pending
+    assert [item["state"] for item in emitted] == ["OPEN"]
+    assert emitted[0]["reason"] == "threshold_reached_on_resolution"
+
+    # Subsequent full healthy segment confirms recovery and emits RESOLVED
+    healthy = make_segment(11)
+    event_store.apply(segment=healthy, result=result(healthy))
+
+    emitted = alerts(client, keys)
     assert [item["state"] for item in emitted] == [
         "OPEN",
         "RESOLVED",
     ]
-    assert emitted[0]["reason"] == (
-        "threshold_reached_on_resolution"
-    )
-    assert emitted[1]["reason"] == "video_returned"
+    assert emitted[1]["reason"] == "healthy_segment_confirmed"
 
 
 def test_repeated_short_black_opens_and_recovers(redis_context):
     client, keys = redis_context
     policy = BlackScreenAlertPolicy(
-        direct_alert_duration=3.0,
+        direct_alert_duration=60.0,
         repeated_event_count=3,
         repeated_window=120.0,
-        repeated_recovery_window=120.0,
     )
     event_store = store(client, keys, policy=policy)
     started_at = datetime(2026, 8, 20, tzinfo=timezone.utc)
 
-    for index in range(6):
+    for index in range(3):
         segment = make_segment(
-            10 + index,
+            10 + (index * 2),
+            duration=1.0,
             program_date_time=(
                 started_at + timedelta(seconds=index * 10)
             ),
@@ -329,20 +345,20 @@ def test_repeated_short_black_opens_and_recovers(redis_context):
             segment=segment,
             result=result(
                 segment,
-                BlackInterval(start=1.0, end=2.0),
+                BlackInterval(start=0.0, end=1.0),
             ),
         )
-
-    quiet_segment = make_segment(
-        16,
-        program_date_time=(
-            started_at + timedelta(seconds=172)
-        ),
-    )
-    event_store.apply(
-        segment=quiet_segment,
-        result=result(quiet_segment),
-    )
+        healthy = make_segment(
+            segment.sequence + 1,
+            duration=1.0,
+            program_date_time=(
+                segment.program_date_time + timedelta(seconds=1)
+            ),
+        )
+        event_store.apply(
+            segment=healthy,
+            result=result(healthy),
+        )
 
     repeated = [
         item
@@ -351,9 +367,286 @@ def test_repeated_short_black_opens_and_recovers(redis_context):
     ]
     assert [item["state"] for item in repeated] == [
         "OPEN",
-        "UPDATE",
         "RESOLVED",
     ]
     assert repeated[0]["occurrences"] == "3"
-    assert repeated[1]["occurrences"] == "6"
-    assert repeated[2]["event_id"] == repeated[0]["event_id"]
+    assert repeated[1]["event_id"] == repeated[0]["event_id"]
+
+    fourth = make_segment(
+        16,
+        duration=1.0,
+        program_date_time=started_at + timedelta(seconds=40),
+    )
+    event_store.apply(
+        segment=fourth,
+        result=result(fourth, BlackInterval(start=0.0, end=1.0)),
+    )
+    fourth_healthy = make_segment(
+        17,
+        duration=1.0,
+        program_date_time=started_at + timedelta(seconds=41),
+    )
+    event_store.apply(
+        segment=fourth_healthy,
+        result=result(fourth_healthy),
+    )
+    assert len(
+        [
+            item
+            for item in alerts(client, keys)
+            if item["type"] == "REPEATED_BLACK_SCREEN"
+        ]
+    ) == 2
+
+
+def test_sub_segment_black_is_not_counted_as_repeated_candidate(
+    redis_context,
+):
+    client, keys = redis_context
+    segment = make_segment(10, duration=6.0)
+
+    store(client, keys).apply(
+        segment=segment,
+        result=result(segment, BlackInterval(start=1.0, end=2.0)),
+    )
+
+    history_key = keys.black.short_history(
+        "stream-1", segment.variant_stable_id, segment.timeline_generation
+    )
+    assert client.client.zcard(history_key) == 0
+    assert alerts(client, keys) == []
+
+
+def test_observation_gap_never_emits_resolved_or_counts_repeated(
+    redis_context,
+):
+    client, keys = redis_context
+    policy = legacy_fast_policy()
+    event_store = store(client, keys, policy=policy)
+    opened = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=opened,
+        result=result(opened, BlackInterval(start=0.0, end=6.0)),
+    )
+
+    after_gap = make_segment(12, duration=6.0)
+    event_store.apply(segment=after_gap, result=result(after_gap))
+
+    emitted = alerts(client, keys)
+    assert [item["state"] for item in emitted] == ["OPEN"]
+    history_key = keys.black.short_history(
+        "stream-1", opened.variant_stable_id, opened.timeline_generation
+    )
+    assert client.client.zcard(history_key) == 0
+    assert not client.client.exists(
+        keys.black.open_event("stream-1", opened.variant_stable_id)
+    )
+
+
+def test_continuous_open_at_60s_exactly_once(redis_context):
+    client, keys = redis_context
+    # Default policy: direct_alert_duration = 60.0
+    event_store = store(client, keys)
+    started_at = datetime(2026, 8, 20, tzinfo=timezone.utc)
+
+    # 10 segments of 6.0s each = 60.0s total black
+    for i in range(10):
+        seg = make_segment(
+            10 + i,
+            duration=6.0,
+            program_date_time=started_at + timedelta(seconds=i * 6),
+        )
+        event_store.apply(
+            segment=seg,
+            result=result(seg, BlackInterval(start=0.0, end=6.0)),
+        )
+        emitted = alerts(client, keys)
+        if i < 9:  # 0 to 54s
+            assert len(emitted) == 0
+        else:  # reached 60.0s
+            assert [item["state"] for item in emitted] == ["OPEN"]
+            assert emitted[0]["type"] == "BLACK_SCREEN"
+
+    # Next segment 11th (66s total black): should NOT emit duplicate OPEN
+    seg_extra = make_segment(
+        20,
+        duration=6.0,
+        program_date_time=started_at + timedelta(seconds=60),
+    )
+    event_store.apply(
+        segment=seg_extra,
+        result=result(seg_extra, BlackInterval(start=0.0, end=6.0)),
+    )
+    emitted = alerts(client, keys)
+    assert len(emitted) == 1
+    assert emitted[0]["state"] == "OPEN"
+
+
+def test_interrupted_black_within_segment_does_not_emit_false_resolved(
+    redis_context,
+):
+    client, keys = redis_context
+    event_store = store(client, keys, policy=legacy_fast_policy())
+
+    # Segment 10 has black ending at 5.0 (0.0 to 5.0, duration 5.0s >= 3.0s threshold -> OPEN)
+    # Then normal video for 1.0s (5.0 to 6.0)
+    seg10 = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=seg10,
+        result=result(seg10, BlackInterval(start=0.0, end=5.0)),
+    )
+    emitted = alerts(client, keys)
+    assert [item["state"] for item in emitted] == ["OPEN"]
+
+    # Segment 11 immediately has black again from start (start=0.0, end=4.0)
+    # This is NOT a healthy segment; it must NOT confirm recovery or emit false RESOLVED
+    seg11 = make_segment(11, duration=6.0)
+    event_store.apply(
+        segment=seg11,
+        result=result(seg11, BlackInterval(start=0.0, end=4.0)),
+    )
+
+    emitted = alerts(client, keys)
+    # State is still OPEN (or new OPEN for the second event), definitely NO RESOLVED
+    assert all(item["state"] != "RESOLVED" for item in emitted)
+
+
+def test_decode_error_does_not_trigger_false_recovery(redis_context):
+    client, keys = redis_context
+    event_store = store(client, keys, policy=legacy_fast_policy())
+
+    seg10 = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=seg10,
+        result=result(seg10, BlackInterval(start=0.0, end=6.0)),
+    )
+    assert [item["state"] for item in alerts(client, keys)] == ["OPEN"]
+
+    # Segment 11 encounters decode failure / checked=False
+    seg11 = make_segment(11, duration=6.0)
+    event_store.apply(
+        segment=seg11,
+        result=BlackDetectionResult(
+            variant_id=seg11.variant_id,
+            sequence=seg11.sequence,
+            segment_uri=seg11.uri,
+            segment_duration=seg11.duration,
+            checked=False,
+            error="ffmpeg decode failed",
+            black_intervals=[],
+        ),
+    )
+
+    # UNKNOWN gap must close the unobserved media state but NEVER emit false RESOLVED
+    emitted = alerts(client, keys)
+    assert [item["state"] for item in emitted] == ["OPEN"]
+
+
+def test_deterministic_alert_id_and_outbox_contract(redis_context):
+    client, keys = redis_context
+    event_store = store(client, keys, policy=legacy_fast_policy())
+
+    seg10 = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=seg10,
+        result=result(seg10, BlackInterval(start=0.0, end=6.0)),
+    )
+    seg11 = make_segment(11, duration=6.0)
+    event_store.apply(segment=seg11, result=result(seg11))
+
+    emitted = alerts(client, keys)
+    assert len(emitted) == 2
+    open_alert, resolved_alert = emitted[0], emitted[1]
+    assert open_alert["state"] == "OPEN"
+    assert resolved_alert["state"] == "RESOLVED"
+    # Both refer to the exact same continuous black event ID
+    assert open_alert["event_id"] == resolved_alert["event_id"]
+    assert open_alert["stream_id"] == "channel-01"
+    assert resolved_alert["stream_id"] == "channel-01"
+    assert open_alert["type"] == "BLACK_SCREEN"
+    assert resolved_alert["type"] == "BLACK_SCREEN"
+    assert len(open_alert["alert_id"]) == 36
+    assert len(resolved_alert["alert_id"]) == 36
+
+
+def test_black_return_preserves_original_open_alert_until_healthy(
+    redis_context,
+):
+    client, keys = redis_context
+    event_store = store(client, keys, policy=legacy_fast_policy())
+
+    first = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=first,
+        result=result(first, BlackInterval(start=0.0, end=5.0)),
+    )
+    original_open = alerts(client, keys)[0]
+
+    returned = make_segment(11, duration=6.0)
+    event_store.apply(
+        segment=returned,
+        result=result(returned, BlackInterval(start=0.0, end=6.0)),
+    )
+    assert [item["state"] for item in alerts(client, keys)] == ["OPEN"]
+
+    healthy = make_segment(12, duration=6.0)
+    event_store.apply(segment=healthy, result=result(healthy))
+
+    emitted = alerts(client, keys)
+    assert [item["state"] for item in emitted] == ["OPEN", "RESOLVED"]
+    assert emitted[1]["event_id"] == original_open["event_id"]
+
+
+def test_unknown_gap_preserves_recovery_until_later_healthy_segment(
+    redis_context,
+):
+    client, keys = redis_context
+    event_store = store(client, keys, policy=legacy_fast_policy())
+    opened = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=opened,
+        result=result(opened, BlackInterval(start=0.0, end=6.0)),
+    )
+
+    unknown = make_segment(11, duration=6.0)
+    event_store.apply(
+        segment=unknown,
+        result=BlackDetectionResult(
+            variant_id=unknown.variant_id,
+            sequence=unknown.sequence,
+            segment_uri=unknown.uri,
+            segment_duration=unknown.duration,
+            checked=False,
+            error="decode failed",
+            black_intervals=[],
+        ),
+    )
+    assert [item["state"] for item in alerts(client, keys)] == ["OPEN"]
+
+    healthy = make_segment(12, duration=6.0)
+    event_store.apply(segment=healthy, result=result(healthy))
+    assert [item["state"] for item in alerts(client, keys)] == [
+        "OPEN",
+        "RESOLVED",
+    ]
+
+
+def test_timeline_change_closes_alert_without_claiming_healthy_recovery(
+    redis_context,
+):
+    client, keys = redis_context
+    event_store = store(client, keys, policy=legacy_fast_policy())
+    opened = make_segment(10, duration=6.0)
+    event_store.apply(
+        segment=opened,
+        result=result(opened, BlackInterval(start=0.0, end=5.0)),
+    )
+
+    reset = make_segment(10, duration=6.0)
+    reset.timeline_generation = 1
+    event_store.apply(segment=reset, result=result(reset))
+
+    emitted = alerts(client, keys)
+    assert [item["state"] for item in emitted] == ["OPEN", "RESOLVED"]
+    assert emitted[1]["reason"] == "timeline_discontinued"
+    assert emitted[1]["event_id"] == emitted[0]["event_id"]

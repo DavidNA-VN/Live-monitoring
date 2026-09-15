@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -235,6 +236,8 @@ class CountingProcessRunner:
 
     def run(self, command, *, timeout):
         self.calls.append((command, timeout))
+        if "rawvideo" in command:
+            Path(command[-1]).write_bytes(bytes([100] * (2 * 32 * 32)))
         return FakeProcessResult()
 
 
@@ -345,6 +348,10 @@ def test_sliding_window_does_not_reprocess_successful_retained_segments(
     assert processor.committed == [100, 101, 102, 103]
     assert first_stats.admitted_work_count == 3
     assert second_stats.admitted_work_count == 1
+    assert first_stats.pending_work_count == 1
+    assert first_stats.in_flight_work_count == 0
+    assert first_stats.retained_work_count == 1
+    assert second_stats.retained_work_count == 0
 
 
 def test_new_segment_is_processed_once(monkeypatch):
@@ -510,7 +517,7 @@ def test_busy_earlier_sequence_prevents_overtaking(
 
     stats = runtime.run_cycle()
 
-    assert stats.scheduled_work_count == 3
+    assert stats.scheduled_work_count == 2
     assert processor.processed == []
     assert processor.committed == []
 
@@ -563,8 +570,10 @@ def test_two_checks_share_one_profile_analysis_per_segment(
         call[0][0] == "ffmpeg" for call in runner.calls
     )
     assert all(
-        "blackdetect=" in call[0][call[0].index("-vf") + 1]
-        and "freezedetect=" in call[0][call[0].index("-vf") + 1]
+        "blackdetect="
+        in call[0][call[0].index("-filter_complex") + 1]
+        and "freezedetect="
+        in call[0][call[0].index("-filter_complex") + 1]
         for call in runner.calls
     )
     assert first.processed == [100, 101]

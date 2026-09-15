@@ -56,7 +56,7 @@ def test_stream_config_dto_valid():
         "transition_cycles": 3,
     }
     assert data["variant_selection"] == {
-        "mode": "all",
+        "mode": "highest_quality",
         "representative_count": 3,
         "explicit_variant_ids": [],
     }

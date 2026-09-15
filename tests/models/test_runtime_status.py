@@ -31,6 +31,9 @@ def test_runtime_status_to_dict_matches_public_contract_fields():
         active_variant_count=3,
         queue_depth=5,
         queue_lag_seconds=1.25,
+        pending_work_count=5,
+        in_flight_work_count=2,
+        retained_work_count=7,
         error=None,
         telemetry_available=True,
         health_reasons=("all_checks_passing",),
@@ -52,6 +55,13 @@ def test_runtime_status_to_dict_matches_public_contract_fields():
     assert data["active_variant_count"] == 3
     assert data["queue_depth"] == 5
     assert data["queue_lag_seconds"] == 1.25
+    assert data["pending_work_count"] == 5
+    assert data["in_flight_work_count"] == 2
+    assert data["retained_work_count"] == 7
+    assert (
+        data["pending_work_count"] + data["in_flight_work_count"]
+        == data["retained_work_count"]
+    )
     assert data["telemetry_available"] is True
     assert data["health_reasons"] == ["all_checks_passing"]
     assert data["checks"] == {

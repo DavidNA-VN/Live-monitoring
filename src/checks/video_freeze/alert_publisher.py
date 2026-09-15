@@ -46,14 +46,20 @@ class VideoFreezeAlertPublisher:
         attributes = {
             "severity": severity.value,
             "duration": f"{event.duration:.6f}",
-            "warning_duration": f"{self.policy.warning_duration:g}",
-            "alert_duration": f"{self.policy.alert_duration:g}",
+            "direct_alert_duration": (
+                f"{self.policy.direct_alert_duration:g}"
+            ),
             "start_sequence": str(event.start_sequence),
             "end_sequence": str(event.end_sequence),
             "affected_segment_count": str(event.affected_segment_count),
             "timeline_generation": str(event.timeline_generation),
             "start_media_revision": event.start_media_revision,
             "last_media_revision": event.last_media_revision,
+            "start_segment_uri": event.start_segment_uri,
+            "end_segment_uri": event.end_segment_uri,
+            "start_offset_seconds": f"{event.start_offset:.6f}",
+            "end_offset_seconds": f"{event.end_offset:.6f}",
+            "coverage_complete": str(event.coverage_complete).lower(),
         }
         envelope = AlertEnvelope(
             alert_id=deterministic_alert_id(
@@ -129,6 +135,12 @@ class VideoFreezeAlertPublisher:
                 "total_freeze_duration": f"{alert.total_duration:.6f}",
                 "latest_event_id": alert.latest_event_id,
                 "window_seconds": f"{self.policy.repeated_window:g}",
+                "start_sequence": str(alert.start_sequence),
+                "end_sequence": str(alert.end_sequence),
+                "start_segment_uri": alert.start_segment_uri,
+                "end_segment_uri": alert.end_segment_uri,
+                "affected_segment_count": str(alert.affected_segment_count),
+                "coverage_complete": "false",
             },
         )
         self.stream.append(pipeline, envelope)

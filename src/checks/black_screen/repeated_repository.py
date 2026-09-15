@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
+import json
+from typing import Any
 
 import redis
 
 from checks.black_screen.repeated_reducer import (
+    RepeatedBlackAlert,
     RepeatedBlackIncident,
+    RepeatedBlackReduction,
     RepeatedBlackReducer,
     RepeatedBlackState,
     ShortBlackRecord,
@@ -46,7 +52,8 @@ class RedisRepeatedBlackRepository:
         event_key: str,
         open_key: str,
         commit_key: str | None,
-    ) -> None:
+        pipeline: Any = None,
+    ) -> RepeatedBlackReduction:
         history_key, duration_key, incident_key = (
             self._state_keys(
                 event.variant_stable_id,
@@ -62,7 +69,7 @@ class RedisRepeatedBlackRepository:
         )
         incident_ttl = max(
             self.event_ttl_seconds,
-            int(self.policy.repeated_recovery_window * 2),
+            int(self.policy.repeated_window * 2),
         )
 
         state = self._load_state(
@@ -76,17 +83,23 @@ class RedisRepeatedBlackRepository:
                 event_id=event.event_id,
                 event_at=event_time.timestamp(),
                 duration=event.duration,
+                start_sequence=event.start_sequence,
+                end_sequence=event.end_sequence,
+                start_segment_uri=event.start_segment_uri,
+                end_segment_uri=event.end_segment_uri,
+                affected_segment_count=len(event.affected_segments),
             ),
         )
-        pipeline = self.redis.pipeline(transaction=True)
-        pipeline.set(
+        owns_pipe = pipeline is None
+        pipe = self.redis.pipeline(transaction=True) if owns_pipe else pipeline
+        pipe.set(
             event_key,
             payload,
             ex=self.event_ttl_seconds,
         )
-        pipeline.delete(open_key)
+        pipe.delete(open_key)
         self._write_state(
-            pipeline=pipeline,
+            pipeline=pipe,
             state=reduction.state,
             history_key=history_key,
             duration_key=duration_key,
@@ -97,70 +110,79 @@ class RedisRepeatedBlackRepository:
 
         if reduction.alert is not None:
             self.alerts.add_repeated(
-                pipeline,
+                pipe,
                 alert=reduction.alert,
                 variant_id=event.variant_id,
                 variant_stable_id=event.variant_stable_id,
                 policy=self.policy,
             )
         if commit_key is not None:
-            pipeline.set(
+            pipe.set(
                 commit_key,
                 "1",
                 ex=self.commit_ttl_seconds,
             )
 
-        try:
-            pipeline.execute()
-        except redis.RedisError as exc:
-            raise RedisUnavailableError(
-                "Unable to atomically resolve short black event "
-                f"{event.event_id}: {exc}"
-            ) from exc
+        if owns_pipe:
+            try:
+                pipe.execute()
+            except redis.RedisError as exc:
+                raise RedisUnavailableError(
+                    "Unable to atomically resolve short black event "
+                    f"{event.event_id}: {exc}"
+                ) from exc
 
-    def resolve_if_quiet(self, segment: Segment) -> None:
-        reference_time = (
-            segment.program_date_time
-            or datetime.now(timezone.utc)
-        )
+        return reduction
+
+    def resolve_confirmed_recovery(
+        self,
+        *,
+        segment: Segment,
+        reason: str = "healthy_segment_confirmed",
+        pipeline: Any = None,
+        state: RepeatedBlackState | None = None,
+    ) -> RepeatedBlackAlert | None:
         history_key, duration_key, incident_key = (
             self._state_keys(
                 segment.variant_stable_id,
                 segment.timeline_generation,
             )
         )
-
         try:
-            state = self._load_state(
-                history_key=history_key,
-                duration_key=duration_key,
-                incident_key=incident_key,
-            )
-            reduction = self.reducer.resolve_if_quiet(
-                state=state,
-                reference_time=reference_time.timestamp(),
-            )
-            if not reduction.clear_state:
-                return
+            if state is None:
+                state = self._load_state(
+                    history_key=history_key,
+                    duration_key=duration_key,
+                    incident_key=incident_key,
+                )
+            if state.incident is None:
+                return None
 
-            pipeline = self.redis.pipeline(transaction=True)
+            reduction = self.reducer.resolve_incident(
+                state=state,
+                reason=reason,
+            )
+            owns_pipe = pipeline is None
+            pipe = self.redis.pipeline(transaction=True) if owns_pipe else pipeline
             if reduction.alert is not None:
                 self.alerts.add_repeated(
-                    pipeline,
+                    pipe,
                     alert=reduction.alert,
                     variant_id=segment.variant_id,
                     variant_stable_id=segment.variant_stable_id,
                     policy=self.policy,
                 )
-            pipeline.delete(
+            pipe.delete(
                 incident_key,
                 history_key,
                 duration_key,
             )
-            pipeline.execute()
+            if owns_pipe:
+                pipe.execute()
+            return reduction.alert
         except redis.RedisError as exc:
             raise RedisUnavailableError(
-                f"Unable to resolve repeated black incident: {exc}"
+                f"Unable to resolve confirmed repeated black recovery: {exc}"
             ) from exc
 
     def _state_keys(
@@ -206,15 +228,8 @@ class RedisRepeatedBlackRepository:
             else []
         )
         history = tuple(
-            ShortBlackRecord(
-                event_id=event_id,
-                event_at=float(event_at),
-                duration=float(raw_duration or 0),
-            )
-            for (event_id, event_at), raw_duration in zip(
-                raw_history,
-                raw_durations,
-            )
+            self._decode_record(event_id, float(event_at), raw_duration)
+            for (event_id, event_at), raw_duration in zip(raw_history, raw_durations)
         )
         raw_incident = self.redis.hgetall(incident_key)
         incident = None
@@ -233,6 +248,11 @@ class RedisRepeatedBlackRepository:
                 last_notified_occurrences=int(
                     raw_incident["last_notified_occurrences"]
                 ),
+                start_sequence=int(raw_incident.get("start_sequence", -1)),
+                end_sequence=int(raw_incident.get("end_sequence", -1)),
+                start_segment_uri=raw_incident.get("start_segment_uri", ""),
+                end_segment_uri=raw_incident.get("end_segment_uri", ""),
+                affected_segment_count=int(raw_incident.get("affected_segment_count", 0)),
             )
 
         return RepeatedBlackState(
@@ -264,7 +284,14 @@ class RedisRepeatedBlackRepository:
             pipeline.hset(
                 duration_key,
                 mapping={
-                    item.event_id: f"{item.duration:.6f}"
+                    item.event_id: json.dumps({
+                        "duration": item.duration,
+                        "start_sequence": item.start_sequence,
+                        "end_sequence": item.end_sequence,
+                        "start_segment_uri": item.start_segment_uri,
+                        "end_segment_uri": item.end_segment_uri,
+                        "affected_segment_count": item.affected_segment_count,
+                    }, separators=(",", ":"))
                     for item in state.history
                 },
             )
@@ -289,6 +316,30 @@ class RedisRepeatedBlackRepository:
                     "last_notified_occurrences": (
                         incident.last_notified_occurrences
                     ),
+                    "start_sequence": incident.start_sequence,
+                    "end_sequence": incident.end_sequence,
+                    "start_segment_uri": incident.start_segment_uri,
+                    "end_segment_uri": incident.end_segment_uri,
+                    "affected_segment_count": incident.affected_segment_count,
                 },
             )
             pipeline.expire(incident_key, incident_ttl)
+
+    @staticmethod
+    def _decode_record(event_id, event_at, raw):
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            return ShortBlackRecord(event_id, event_at, float(raw or 0))
+        return ShortBlackRecord(
+            event_id=event_id,
+            event_at=event_at,
+            duration=float(data.get("duration", 0)),
+            start_sequence=int(data.get("start_sequence", -1)),
+            end_sequence=int(data.get("end_sequence", -1)),
+            start_segment_uri=str(data.get("start_segment_uri", "")),
+            end_segment_uri=str(data.get("end_segment_uri", "")),
+            affected_segment_count=int(data.get("affected_segment_count", 0)),
+        )

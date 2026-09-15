@@ -86,6 +86,8 @@ class FakeMonitoringControl(
             checks={
                 "black_screen": "ENABLED" if config.checks.black_screen.enabled else "DISABLED",
                 "audio_loss": "ENABLED" if config.checks.audio_loss.enabled else "DISABLED",
+                "video_freeze": "ENABLED" if config.checks.video_freeze.enabled else "DISABLED",
+                "macroblocking": "ENABLED" if config.checks.macroblocking.enabled else "DISABLED",
             },
             worker_id="fake-worker-01",
             observed_at=now,
@@ -299,6 +301,8 @@ class FakeMonitoringControl(
                     "checks": {
                         "black_screen": "ENABLED" if config.checks.black_screen.enabled else "DISABLED",
                         "audio_loss": "ENABLED" if config.checks.audio_loss.enabled else "DISABLED",
+                        "video_freeze": "ENABLED" if config.checks.video_freeze.enabled else "DISABLED",
+                        "macroblocking": "ENABLED" if config.checks.macroblocking.enabled else "DISABLED",
                     },
                     "observed_at": now,
                 }

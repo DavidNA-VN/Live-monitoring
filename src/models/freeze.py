@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from models.frame_fingerprint import BoundaryFrameFingerprint
+
 
 class VideoFreezeSeverity(str, Enum):
     WARNING = "WARNING"
@@ -16,10 +18,17 @@ class VideoFreezeEventStatus(str, Enum):
     RESOLVED = "resolved"
 
 
+class VideoFreezeAlertType(str, Enum):
+    CONTINUOUS = "continuous"
+    REPEATED = "repeated"
+
+
 @dataclass(frozen=True)
 class FreezeInterval:
     start: float
     end: float
+    start_boundary_fingerprint: BoundaryFrameFingerprint | None = None
+    end_boundary_fingerprint: BoundaryFrameFingerprint | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.start) or self.start < 0:
@@ -79,3 +88,47 @@ class VideoFreezeLiveEvent:
     warning_sent: bool = False
     alert_sent: bool = False
     resolution_reason: str | None = None
+    reference_segment_duration: float = 0.0
+    detection_closed: bool = False
+    last_boundary_fingerprint: BoundaryFrameFingerprint | None = None
+    start_segment_uri: str = ""
+    end_segment_uri: str = ""
+    coverage_complete: bool = True
+
+
+@dataclass(frozen=True)
+class VideoFreezeAlertRecoveryState:
+    alert_event_id: str
+    alert_type: VideoFreezeAlertType
+    recovery_pending: bool = False
+    healthy_segments_observed: int = 0
+    last_observed_sequence: int = -1
+    timeline_generation: int = 0
+    discontinuity_sequence: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.alert_event_id:
+            raise ValueError("alert_event_id must not be empty")
+        if not isinstance(self.alert_type, VideoFreezeAlertType):
+            object.__setattr__(
+                self, "alert_type", VideoFreezeAlertType(self.alert_type)
+            )
+        if not isinstance(self.recovery_pending, bool):
+            raise TypeError("recovery_pending must be a bool")
+        for name in (
+            "healthy_segments_observed",
+            "last_observed_sequence",
+            "timeline_generation",
+            "discontinuity_sequence",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an int")
+        if self.healthy_segments_observed < 0:
+            raise ValueError("healthy_segments_observed must be >= 0")
+        if self.last_observed_sequence < -1:
+            raise ValueError("last_observed_sequence must be >= -1")
+        if self.timeline_generation < 0:
+            raise ValueError("timeline_generation must be >= 0")
+        if self.discontinuity_sequence < 0:
+            raise ValueError("discontinuity_sequence must be >= 0")

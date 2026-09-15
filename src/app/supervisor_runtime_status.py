@@ -71,6 +71,11 @@ class SupervisorRuntimeStatusReader:
                 if config.video_freeze_enabled
                 else CheckStatus.DISABLED
             ),
+            "macroblocking": (
+                CheckStatus.ENABLED
+                if config.macroblocking_enabled
+                else CheckStatus.DISABLED
+            ),
             "audio_loss": (
                 CheckStatus.ENABLED
                 if config.audio_loss_enabled
@@ -149,6 +154,9 @@ class SupervisorRuntimeStatusReader:
         profile_analysis_total: dict[str, int] = {}
         active_media_processes = 0
         max_media_processes = 0
+        pending_work_count = 0
+        in_flight_work_count = 0
+        retained_work_count = 0
 
         if telemetry_available:
             # Parse health
@@ -234,6 +242,17 @@ class SupervisorRuntimeStatusReader:
                 max_media_processes = _non_negative_int(
                     "max_media_processes"
                 )
+                pending_work_count = _non_negative_int(
+                    "pending_work_count"
+                )
+                in_flight_work_count = _non_negative_int(
+                    "in_flight_work_count"
+                )
+                retained_work_count = _non_negative_int(
+                    "retained_work_count"
+                )
+                if _get_metric_field("pending_work_count") is not None:
+                    queue_depth = pending_work_count
                 active_media_processes = min(
                     active_media_processes,
                     max_media_processes,
@@ -302,4 +321,7 @@ class SupervisorRuntimeStatusReader:
             profile_analysis_total=profile_analysis_total,
             active_media_processes=active_media_processes,
             max_media_processes=max_media_processes,
+            pending_work_count=pending_work_count,
+            in_flight_work_count=in_flight_work_count,
+            retained_work_count=retained_work_count,
         )

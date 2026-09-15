@@ -18,6 +18,7 @@ class ProcessGate(Protocol):
 class MediaProcessCapacitySnapshot:
     active: int
     maximum: int
+    peak_active: int
 
 
 class ObservableProcessGate:
@@ -28,6 +29,7 @@ class ObservableProcessGate:
             raise ValueError("max_concurrent must be > 0")
         self.maximum = max_concurrent
         self._active = 0
+        self._peak_active = 0
         self._condition = Condition()
 
     def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
@@ -52,6 +54,7 @@ class ObservableProcessGate:
                     self._condition.wait(remaining)
 
             self._active += 1
+            self._peak_active = max(self._peak_active, self._active)
             return True
 
     def release(self) -> None:
@@ -66,6 +69,7 @@ class ObservableProcessGate:
             return MediaProcessCapacitySnapshot(
                 active=self._active,
                 maximum=self.maximum,
+                peak_active=self._peak_active,
             )
 
 

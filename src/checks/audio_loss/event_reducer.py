@@ -276,6 +276,9 @@ class AudioLossEventReducer:
             rendition_default=segment.rendition_default,
             rendition_autoselect=segment.rendition_autoselect,
             hls_stable_rendition_id=segment.hls_stable_rendition_id,
+            start_segment_uri=segment.uri,
+            end_segment_uri=segment.uri,
+            coverage_complete=True,
         )
 
     @staticmethod
@@ -303,6 +306,7 @@ class AudioLossEventReducer:
         )
         event.last_segment_duration = segment.duration
         event.last_media_revision = segment.media_revision
+        event.end_segment_uri = segment.uri
         if cause not in event.causes_seen:
             event.causes_seen.append(cause)
         if is_new_segment:

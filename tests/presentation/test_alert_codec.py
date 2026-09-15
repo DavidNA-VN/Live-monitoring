@@ -118,6 +118,7 @@ def test_6_map_redis_type_to_api_event_type():
         "AUDIO_LOSS",
         "VIDEO_FREEZE",
         "REPEATED_VIDEO_FREEZE",
+        "MACROBLOCKING",
         "RUNTIME_HEALTH",
     ]:
         fields = valid_alert_fields()

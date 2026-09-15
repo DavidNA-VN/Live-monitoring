@@ -5,6 +5,7 @@ from enum import Enum
 
 
 class VariantSelectionMode(str, Enum):
+    HIGHEST_QUALITY = "highest_quality"
     ALL = "all"
     REPRESENTATIVE = "representative"
     EXPLICIT = "explicit"
@@ -12,7 +13,7 @@ class VariantSelectionMode(str, Enum):
 
 @dataclass(frozen=True)
 class VariantSelectionPolicy:
-    mode: VariantSelectionMode = VariantSelectionMode.ALL
+    mode: VariantSelectionMode = VariantSelectionMode.HIGHEST_QUALITY
     representative_count: int = 3
     explicit_variant_ids: tuple[str, ...] = ()
 

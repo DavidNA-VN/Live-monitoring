@@ -10,6 +10,7 @@ from models.audio import AudioTrackPresence
 class AnalysisRequirement(str, Enum):
     BLACK_INTERVALS = "black_intervals"
     FREEZE_INTERVALS = "freeze_intervals"
+    MACROBLOCKING_OBSERVATIONS = "macroblocking_observations"
     SILENCE_INTERVALS = "silence_intervals"
 
 
@@ -56,9 +57,15 @@ class VideoRealtimeAnalysis:
     outputs: Mapping[AnalysisRequirement, object] = field(
         default_factory=dict
     )
+    diagnostics: Mapping[str, int | float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "outputs", MappingProxyType(dict(self.outputs)))
+        object.__setattr__(
+            self,
+            "diagnostics",
+            MappingProxyType(dict(self.diagnostics)),
+        )
 
     def require_output(
         self,

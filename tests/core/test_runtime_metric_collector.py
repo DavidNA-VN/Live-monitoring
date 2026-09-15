@@ -92,6 +92,12 @@ def test_video_operational_metrics_distinguish_freeze_from_analysis_failure():
                         FreezeInterval(start=3.0, end=4.0),
                     )
                 },
+                diagnostics={
+                    "video_freeze_raw_interval_total": 3,
+                    "video_freeze_raw_seconds_total": 4.0,
+                    "video_freeze_black_overlap_seconds_total": 1.5,
+                    "video_freeze_boundary_fingerprint_total": 2,
+                },
             ),
         )
     )
@@ -113,6 +119,10 @@ def test_video_operational_metrics_distinguish_freeze_from_analysis_failure():
         "video_analysis_timeout_total": 1,
         "video_freeze_interval_total": 2,
         "video_freeze_seconds_total": 2.5,
+        "video_freeze_raw_interval_total": 3,
+        "video_freeze_raw_seconds_total": 4.0,
+        "video_freeze_black_overlap_seconds_total": 1.5,
+        "video_freeze_boundary_fingerprint_total": 2,
     }
 
 
@@ -135,3 +145,34 @@ def test_analysis_bundle_reports_timeout_from_either_media_profile():
 
     assert video.media_process_timed_out is True
     assert audio.media_process_timed_out is True
+
+
+def test_performance_metrics_are_aggregated_and_percentiles_reset():
+    collector = RuntimeMetricCollector()
+    collector.record_work_submitted("video_realtime", 2)
+    collector.record_work_started(
+        "video_realtime", count=2, executor_wait_seconds=0.25
+    )
+    collector.record_process_gate_wait("video_realtime", 0.1)
+    collector.record_process_gate_wait("video_realtime", 0.3)
+    collector.record_profile_execution("video_realtime", 0.4)
+    collector.record_result_processing("video_realtime", 0.02)
+    collector.record_result_commit("video_realtime", 0.03)
+    collector.record_work_completed("video_realtime")
+    collector.record_work_failed("video_realtime")
+    collector.record_work_timed_out("video_realtime")
+
+    metrics = collector.drain().profile_metrics
+
+    assert metrics["perf_video_realtime_work_submitted_total"] == 2
+    assert metrics["perf_video_realtime_work_started_total"] == 2
+    assert metrics["perf_video_realtime_executor_wait_seconds_total"] == 0.5
+    assert metrics["perf_video_realtime_process_gate_wait_seconds_p50"] == 0.1
+    assert metrics["perf_video_realtime_process_gate_wait_seconds_p95"] == 0.3
+    assert metrics["perf_video_realtime_profile_execution_seconds_p99"] == 0.4
+    assert metrics["perf_video_realtime_result_processing_seconds_total"] == 0.02
+    assert metrics["perf_video_realtime_result_commit_seconds_total"] == 0.03
+    assert metrics["perf_video_realtime_work_completed_total"] == 1
+    assert metrics["perf_video_realtime_work_failed_total"] == 1
+    assert metrics["perf_video_realtime_work_timed_out_total"] == 1
+    assert collector.drain().profile_metrics == {}

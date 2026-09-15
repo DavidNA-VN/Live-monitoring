@@ -3,7 +3,6 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import shutil
-import subprocess
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 import pytest
@@ -12,6 +11,7 @@ from app.monitoring_worker import MonitoringWorkerApplication
 from app.monitoring_worker_runner import MonitoringWorkerRunner
 from scripts.generate_audio_loss_fixtures import generate_fixtures as generate_audio_fixtures
 from scripts.publish_live_hls import HLS_ROOT, publish
+from tests.e2e.black_rule_fixture import generate_black_rule_vod
 
 pytestmark = [
     pytest.mark.worker_e2e,
@@ -32,49 +32,6 @@ def _check_prerequisites():
         pytest.skip("FFmpeg/FFprobe is not installed on the system")
 
 
-def _generate_black_screen_vod(output_dir: Path, segment_duration: float = 1.0, total_duration: int = 10) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    playlist_path = output_dir / "stream.m3u8"
-    master_path = output_dir / "master.m3u8"
-
-    cmd = [
-        shutil.which("ffmpeg"),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        f"color=c=black:s=128x72:r=10:d={total_duration}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-g",
-        "10",
-        "-an",
-        "-f",
-        "hls",
-        "-hls_time",
-        str(segment_duration),
-        "-hls_list_size",
-        "0",
-        "-hls_segment_filename",
-        str(output_dir / "seg_%03d.ts"),
-        str(playlist_path),
-    ]
-    subprocess.run(cmd, check=True, timeout=20)
-
-    master_content = (
-        "#EXTM3U\n"
-        "#EXT-X-VERSION:3\n"
-        '#EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=128x72\n'
-        "stream.m3u8\n"
-    )
-    master_path.write_text(master_content, encoding="utf-8")
-
-
 def test_black_screen_alert_end_to_end(redis_context, probe):
     _check_prerequisites()
     client, namespace = redis_context
@@ -86,7 +43,7 @@ def test_black_screen_alert_end_to_end(redis_context, probe):
         source_dir = temp_path / "source"
         live_dir = temp_path / "live"
         live_dir.mkdir(parents=True, exist_ok=True)
-        _generate_black_screen_vod(source_dir, segment_duration=1.0, total_duration=10)
+        generate_black_rule_vod(source_dir, segment_duration=1.0)
 
         handler = partial(QuietHandler, directory=str(temp_path))
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -170,7 +127,7 @@ def test_black_screen_alert_end_to_end(redis_context, probe):
             alert = probe.wait_alert(
                 lambda env: env.stream_id == stream_id and env.event_type == "BLACK_SCREEN",
                 stream_id=stream_id,
-                timeout=25.0,
+                timeout=45.0,
             )
 
             assert alert.stream_id == stream_id
@@ -179,6 +136,38 @@ def test_black_screen_alert_end_to_end(redis_context, probe):
             assert alert.variant_stable_id is not None
             assert "storage_id" not in alert.attributes
             assert "storage_id" not in alert.to_redis_fields()["payload"]
+
+            repeated_open = probe.wait_alert(
+                lambda env: (
+                    env.stream_id == stream_id
+                    and env.event_type == "REPEATED_BLACK_SCREEN"
+                    and env.state == "OPEN"
+                ),
+                stream_id=stream_id,
+                timeout=45.0,
+            )
+            repeated_resolved = probe.wait_alert(
+                lambda env: (
+                    env.stream_id == stream_id
+                    and env.event_type == "REPEATED_BLACK_SCREEN"
+                    and env.state == "RESOLVED"
+                ),
+                stream_id=stream_id,
+                timeout=45.0,
+            )
+            assert repeated_resolved.event_id == repeated_open.event_id
+
+            resolved = probe.wait_alert(
+                lambda env: (
+                    env.stream_id == stream_id
+                    and env.event_type == "BLACK_SCREEN"
+                    and env.state == "RESOLVED"
+                ),
+                stream_id=stream_id,
+                timeout=45.0,
+            )
+            assert resolved.event_id == alert.event_id
+            assert resolved.reason == "healthy_segment_confirmed"
 
             # Clean stop
             stop_id = probe.send_command("STOP", stream_id)

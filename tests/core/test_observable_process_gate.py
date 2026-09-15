@@ -14,6 +14,7 @@ def test_gate_acquire_release_updates_snapshot_counter():
     snap = gate.snapshot()
     assert snap.active == 0
     assert snap.maximum == 3
+    assert snap.peak_active == 0
 
     assert gate.acquire() is True
     snap = gate.snapshot()
@@ -22,6 +23,7 @@ def test_gate_acquire_release_updates_snapshot_counter():
     assert gate.acquire() is True
     snap = gate.snapshot()
     assert snap.active == 2
+    assert snap.peak_active == 2
 
     gate.release()
     snap = gate.snapshot()
@@ -30,6 +32,7 @@ def test_gate_acquire_release_updates_snapshot_counter():
     gate.release()
     snap = gate.snapshot()
     assert snap.active == 0
+    assert snap.peak_active == 2
 
 
 def test_gate_respects_maximum_capacity():

@@ -7,6 +7,7 @@ from app.stream_config_mapper import (
     stream_config_to_public,
 )
 from models.stream_config import StreamConfig
+from models.variant_selection import VariantSelectionMode, VariantSelectionPolicy
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -41,7 +42,7 @@ def test_stream_config_to_public_serialization():
         "transition_cycles": 3,
     }
     assert public_dict["variant_selection"] == {
-        "mode": "all",
+        "mode": "highest_quality",
         "representative_count": 3,
         "explicit_variant_ids": [],
     }
@@ -57,6 +58,7 @@ def test_stream_config_to_public_serialization():
         "warning_duration_seconds": 4.0,
         "alert_duration_seconds": 6.0,
     }
+    assert public_dict["checks"]["macroblocking"] == {"enabled": False}
     assert "storage_id" not in public_dict
 
     # Verify round-trip mapping
@@ -69,6 +71,7 @@ def test_stream_config_to_public_serialization():
     assert reconstructed.audio_loss_duration == config.audio_loss_duration
     assert reconstructed.audio_track_index == config.audio_track_index
     assert reconstructed.video_freeze_enabled is True
+    assert reconstructed.macroblocking_enabled is False
     assert reconstructed.freeze_noise_db == -55.0
     assert reconstructed.freeze_detector_minimum_duration == 0.3
     assert reconstructed.freeze_warning_duration == 4.0
@@ -78,8 +81,33 @@ def test_stream_config_to_public_serialization():
     assert reconstructed.admission_policy.recovery_lag_target_durations == 1.5
     assert reconstructed.admission_policy.hard_lag_target_durations == 6.0
     assert reconstructed.admission_policy.live_edge_retention_segments == 2
-    assert reconstructed.variant_selection.mode.value == "all"
+    assert reconstructed.variant_selection.mode.value == "highest_quality"
     assert reconstructed.admission_policy.transition_cycles == 3
+
+
+def test_macroblocking_enabled_round_trips_without_detector_tuning_fields():
+    item = StreamConfig(
+        stream_id="channel-01",
+        master_url="https://example.test/stream.m3u8",
+        macroblocking_enabled=True,
+    )
+    public = stream_config_to_public(item)
+    assert public["checks"]["macroblocking"] == {"enabled": True}
+    assert stream_config_from_public(public).macroblocking_enabled is True
+
+
+def test_macroblocking_rejects_non_highest_quality_selection():
+    with pytest.raises(
+        ValueError, match="macroblocking requires highest_quality"
+    ):
+        StreamConfig(
+            stream_id="channel-01",
+            master_url="https://example.test/stream.m3u8",
+            macroblocking_enabled=True,
+            variant_selection=VariantSelectionPolicy(
+                mode=VariantSelectionMode.ALL
+            ),
+        )
 
 
 def test_legacy_public_config_defaults_freeze_to_disabled():
@@ -102,3 +130,4 @@ def test_legacy_public_config_defaults_freeze_to_disabled():
     assert mapped.video_freeze_enabled is False
     assert mapped.admission_policy.startup_mode.value == "bounded_history"
     assert mapped.admission_policy.startup_lookback_segments == 4
+    assert mapped.variant_selection.mode.value == "highest_quality"

@@ -33,19 +33,33 @@ class TimeRange:
 
 
 @dataclass(frozen=True)
+class ExpectedAlert:
+    event_type: str
+    states: tuple[str, ...]
+    per_variant: int = 1
+
+
+@dataclass(frozen=True)
 class MonitoringCase:
     name: str
     duration: float
     black_ranges: tuple[TimeRange, ...] = ()
     freeze_ranges: tuple[TimeRange, ...] = ()
     silence_ranges: tuple[TimeRange, ...] = ()
+    macroblocking_ranges: tuple[TimeRange, ...] = ()
     audio_track: bool = True
+    expected_alerts: tuple[ExpectedAlert, ...] = ()
     notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.duration) or self.duration <= 0:
             raise ValueError("case duration must be finite and > 0")
-        ranges = self.black_ranges + self.freeze_ranges + self.silence_ranges
+        ranges = (
+            self.black_ranges
+            + self.freeze_ranges
+            + self.silence_ranges
+            + self.macroblocking_ranges
+        )
         if any(item.end >= self.duration for item in ranges):
             raise ValueError("all ranges must end before case duration")
         if not self.audio_track and self.silence_ranges:
@@ -60,22 +74,40 @@ CASES = (
     ),
     MonitoringCase(
         name="black_screen",
-        duration=44.0,
+        duration=96.0,
         black_ranges=(
-            TimeRange(6.0, 8.0),
-            TimeRange(14.0, 16.0),
-            TimeRange(22.0, 24.0),
-            TimeRange(30.0, 38.0),
+            TimeRange(6.0, 8.2),
+            TimeRange(14.0, 16.2),
+            TimeRange(22.0, 24.2),
+            TimeRange(30.0, 92.0),
+        ),
+        expected_alerts=(
+            ExpectedAlert(
+                event_type="REPEATED_BLACK_SCREEN",
+                states=("OPEN", "RESOLVED"),
+            ),
+            ExpectedAlert(
+                event_type="BLACK_SCREEN",
+                states=("OPEN", "RESOLVED"),
+            ),
         ),
         notes=(
             "Enable black-screen and disable freeze for isolated validation.",
-            "Three 2s events exercise repeated-warning policy; 8s alerts directly.",
+            "Three 2.2s events exceed one segment and open repeated alert.",
+            "The 62s event opens the continuous alert.",
+            "A full healthy segment confirms each public alert recovery.",
         ),
     ),
     MonitoringCase(
         name="audio_silence",
         duration=44.0,
         silence_ranges=(TimeRange(4.0, 39.0),),
+        expected_alerts=(
+            ExpectedAlert(
+                event_type="AUDIO_LOSS",
+                states=("OPEN", "RESOLVED"),
+            ),
+        ),
         notes=(
             "Audio track remains present but is silent for 35 seconds.",
             "Video stays in motion; expected cause is continuous_silence.",
@@ -85,6 +117,12 @@ CASES = (
         name="audio_missing",
         duration=40.0,
         audio_track=False,
+        expected_alerts=(
+            ExpectedAlert(
+                event_type="AUDIO_LOSS",
+                states=("OPEN",),
+            ),
+        ),
         notes=(
             "No audio elementary stream exists in any segment.",
             "The 40s cycle crosses the 30s audio-loss alert threshold.",
@@ -93,32 +131,84 @@ CASES = (
     ),
     MonitoringCase(
         name="video_freeze",
-        duration=36.0,
+        duration=96.0,
         freeze_ranges=(
-            TimeRange(2.0, 4.9),
-            TimeRange(7.0, 10.2),
-            TimeRange(13.0, 18.2),
-            TimeRange(21.0, 24.2),
-            TimeRange(27.0, 30.2),
+            TimeRange(2.0, 6.0),
+            TimeRange(10.0, 14.0),
+            TimeRange(18.0, 22.0),
+            TimeRange(28.0, 90.0),
+        ),
+        expected_alerts=(
+            ExpectedAlert(
+                event_type="REPEATED_VIDEO_FREEZE",
+                states=("OPEN", "RESOLVED"),
+            ),
+            ExpectedAlert(
+                event_type="VIDEO_FREEZE",
+                states=("OPEN", "RESOLVED"),
+            ),
         ),
         notes=(
-            "Covers 2.9s no-public, 3.2s warning and 5.2s alert boundaries.",
-            "Three 3.2s events occur inside the repeated 120s window.",
+            "Three 4s candidates open and recover a repeated incident.",
+            "The 62s interval opens continuous freeze at 60s.",
+            "A full healthy segment confirms public alert recovery.",
+        ),
+    ),
+    MonitoringCase(
+        name="macroblocking",
+        duration=24.0,
+        macroblocking_ranges=(TimeRange(4.0, 18.0),),
+        expected_alerts=(
+            ExpectedAlert(
+                event_type="MACROBLOCKING",
+                states=("OPEN", "RESOLVED"),
+            ),
+        ),
+        notes=(
+            "Enable macroblocking and disable unrelated checks for isolation.",
+            "A 40 percent pixelated region lasts 14 seconds and crosses the 10 second rule.",
+            "Only the highest-quality variant is selected by production policy.",
+            "The healthy segment after 18s confirms public alert recovery.",
         ),
     ),
     MonitoringCase(
         name="combined",
-        duration=64.0,
-        black_ranges=(TimeRange(8.0, 10.0), TimeRange(44.0, 52.0)),
-        freeze_ranges=(
-            TimeRange(14.0, 17.2),
-            TimeRange(24.0, 29.2),
-            TimeRange(56.0, 59.2),
+        duration=72.0,
+        black_ranges=(
+            TimeRange(4.0, 6.2),
+            TimeRange(12.0, 14.2),
+            TimeRange(20.0, 22.2),
         ),
-        silence_ranges=(TimeRange(4.0, 39.0),),
+        freeze_ranges=(
+            TimeRange(26.0, 30.0),
+            TimeRange(34.0, 38.0),
+            TimeRange(42.0, 46.0),
+        ),
+        silence_ranges=(TimeRange(2.0, 37.0),),
+        macroblocking_ranges=(TimeRange(50.0, 64.0),),
+        expected_alerts=(
+            ExpectedAlert(
+                event_type="REPEATED_BLACK_SCREEN",
+                states=("OPEN", "RESOLVED"),
+            ),
+            ExpectedAlert(
+                event_type="AUDIO_LOSS",
+                states=("OPEN", "RESOLVED"),
+            ),
+            ExpectedAlert(
+                event_type="REPEATED_VIDEO_FREEZE",
+                states=("OPEN", "RESOLVED"),
+            ),
+            ExpectedAlert(
+                event_type="MACROBLOCKING",
+                states=("OPEN", "RESOLVED"),
+            ),
+        ),
         notes=(
-            "Enable all checks for shared-video-profile and dashboard validation.",
-            "Black frames are static and may independently satisfy freeze detection.",
+            "Enable all four checks for shared-profile and dashboard validation.",
+            "Three short black and freeze events exercise repeated rules.",
+            "Audio silence and macroblocking independently cross direct thresholds.",
+            "Fault windows do not overlap, so alert ownership is deterministic.",
         ),
     ),
 )
@@ -155,9 +245,39 @@ def _video_filter_graph(spec: MonitoringCase) -> str | None:
             f"first={first}:last={last}:replace={first}[{output}]"
         )
         source = output
+    for index, item in enumerate(spec.macroblocking_ranges):
+        base = f"macro_base{index}"
+        region_source = f"macro_source{index}"
+        pixelated = f"macro_pixels{index}"
+        output = f"macro{index}"
+        stages.append(f"[{source}]split=2[{base}][{region_source}]")
+        stages.append(
+            f"[{region_source}]crop=iw*0.625:ih*0.64:iw*0.1875:ih*0.18,"
+            "noise=alls=32:allf=t+u,scale=iw/16:ih/16:flags=area,"
+            f"scale=iw*16:ih*16:flags=neighbor[{pixelated}]"
+        )
+        stages.append(
+            f"[{base}][{pixelated}]overlay=x=main_w*0.1875:y=main_h*0.18:"
+            f"enable='gte(t,{item.start:g})*lt(t,{item.end:g})'[{output}]"
+        )
+        source = output
+    if spec.macroblocking_ranges:
+        recovery_start = spec.macroblocking_ranges[-1].end
+        recovery_base = "macro_recovery_base"
+        recovery = "macro_recovery"
+        stages.append(
+            f"[{source}]drawbox=x=0:y=0:w=iw:h=ih:color=gray:t=fill:"
+            f"enable='gte(t,{recovery_start:g})'[{recovery_base}]"
+        )
+        stages.append(
+            f"[{recovery_base}]drawbox=x=iw*0.2:y=ih*0.2:w=iw*0.35:h=ih*0.35:"
+            f"color=white:t=fill:enable='gte(t,{recovery_start:g})'"
+            f"[{recovery}]"
+        )
+        source = recovery
     if spec.black_ranges:
         enables = "+".join(
-            f"between(t,{item.start:g},{item.end:g})"
+            f"gte(t,{item.start:g})*lt(t,{item.end:g})"
             for item in spec.black_ranges
         )
         stages.append(
@@ -176,7 +296,7 @@ def _audio_filter(spec: MonitoringCase) -> str | None:
     if not spec.silence_ranges:
         return None
     enables = "+".join(
-        f"between(t,{item.start:g},{item.end:g})"
+        f"gte(t,{item.start:g})*lt(t,{item.end:g})"
         for item in spec.silence_ranges
     )
     return f"volume=volume=0:enable='{enables}'"
@@ -299,6 +419,7 @@ def _ranges(items: tuple[TimeRange, ...]) -> list[dict[str, float]]:
 
 
 def _write_expected(case_dir: Path, spec: MonitoringCase) -> None:
+    validate_all = spec.name == "healthy"
     payload = {
         "case": spec.name,
         "duration": spec.duration,
@@ -306,9 +427,26 @@ def _write_expected(case_dir: Path, spec: MonitoringCase) -> None:
         "segment_duration": SEGMENT_DURATION,
         "variant_count": len(VARIANTS),
         "audio_track_present": spec.audio_track,
+        "recommended_checks": {
+            "black_screen": validate_all or bool(spec.black_ranges),
+            "video_freeze": validate_all or bool(spec.freeze_ranges),
+            "audio_loss": (
+                validate_all or bool(spec.silence_ranges) or not spec.audio_track
+            ),
+            "macroblocking": validate_all or bool(spec.macroblocking_ranges),
+        },
         "black_ranges": _ranges(spec.black_ranges),
         "freeze_ranges": _ranges(spec.freeze_ranges),
         "silence_ranges": _ranges(spec.silence_ranges),
+        "macroblocking_ranges": _ranges(spec.macroblocking_ranges),
+        "expected_alerts": [
+            {
+                "event_type": item.event_type,
+                "states": list(item.states),
+                "per_variant": item.per_variant,
+            }
+            for item in spec.expected_alerts
+        ],
         "notes": list(spec.notes),
     }
     (case_dir / "expected.json").write_text(

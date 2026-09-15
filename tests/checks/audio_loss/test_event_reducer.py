@@ -116,6 +116,9 @@ def test_fifteen_two_second_segments_form_one_thirty_second_event():
     assert len(event_ids) == 1
     assert current.duration == pytest.approx(30.0)
     assert current.affected_segment_count == 15
+    assert current.start_segment_uri.endswith("/100.ts")
+    assert current.end_segment_uri.endswith("/114.ts")
+    assert current.coverage_complete is True
     assert AudioLossAlertPolicy().should_alert(current.duration) is True
 
 

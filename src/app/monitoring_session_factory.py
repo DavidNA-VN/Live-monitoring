@@ -9,6 +9,9 @@ from checks.audio_loss.redis_keys import AudioLossRedisKeys
 from checks.black_screen.live_state import RedisBlackEventStore
 from checks.black_screen.processor import BlackScreenSegmentProcessor
 from checks.black_screen.redis_keys import BlackScreenRedisKeys
+from checks.macroblocking.live_state import RedisMacroblockingEventStore
+from checks.macroblocking.processor import MacroblockingSegmentProcessor
+from checks.macroblocking.redis_keys import MacroblockingRedisKeys
 from checks.video_freeze.live_state import RedisVideoFreezeEventStore
 from checks.video_freeze.processor import VideoFreezeSegmentProcessor
 from checks.video_freeze.redis_keys import VideoFreezeRedisKeys
@@ -82,6 +85,7 @@ class MonitoringSessionFactory:
         self.alert_keys = AlertRedisKeys(self.namespace)
         self.black_keys = BlackScreenRedisKeys(self.namespace)
         self.freeze_keys = VideoFreezeRedisKeys(self.namespace)
+        self.macroblocking_keys = MacroblockingRedisKeys(self.namespace)
         self.audio_keys = AudioLossRedisKeys(self.namespace)
         self.alert_sink_factory = alert_sink_factory
         self.per_stream_media_processes = per_stream_media_processes
@@ -149,13 +153,18 @@ class MonitoringSessionFactory:
         processors: list[SegmentProcessor] = []
         identity = config.identity
         try:
-            if config.black_screen_enabled or config.video_freeze_enabled:
+            if (
+                config.black_screen_enabled
+                or config.video_freeze_enabled
+                or config.macroblocking_enabled
+            ):
                 video_profile = VideoRealtimeProfile(
                     freeze_noise_db=config.freeze_noise_db,
                     freeze_detector_minimum_duration=(
                         config.freeze_detector_minimum_duration
                     ),
                     media_input_resolver=self._media_resolver(config),
+                    enable_macroblocking=config.macroblocking_enabled,
                 )
                 profiles.append(video_profile)
 
@@ -191,6 +200,24 @@ class MonitoringSessionFactory:
                                 alert_duration=config.freeze_alert_duration,
                             ),
                             freeze_keys=self.freeze_keys,
+                            alert_keys=self.alert_keys,
+                            runtime_keys=self.runtime_keys,
+                            alert_stream_max_length=(
+                                config.alert_stream_max_length
+                            ),
+                            alert_sink=alert_sink,
+                        )
+                    )
+                )
+
+            if config.macroblocking_enabled:
+                processors.append(
+                    MacroblockingSegmentProcessor(
+                        event_store=RedisMacroblockingEventStore(
+                            storage_id=identity.storage_id,
+                            external_stream_id=identity.external_stream_id,
+                            redis_client=redis_client,
+                            macroblocking_keys=self.macroblocking_keys,
                             alert_keys=self.alert_keys,
                             runtime_keys=self.runtime_keys,
                             alert_stream_max_length=(

@@ -184,6 +184,15 @@ class AdmissionResult:
     drops: tuple[AdmissionDrop, ...] = ()
 
 
+@dataclass(frozen=True)
+class AdmissionQueuePressure:
+    pending_depth: int
+    in_flight_depth: int
+    retained_depth: int
+    oldest_pending_age_seconds: float
+    oldest_retained_age_seconds: float
+
+
 class AdmissionQueue(Protocol):
     def admit(
         self,
@@ -228,8 +237,23 @@ class AdmissionQueue(Protocol):
     def depth(self) -> int:
         ...
 
+    def pressure_snapshot(self) -> AdmissionQueuePressure:
+        ...
+
     @property
     def oldest_age_seconds(self) -> float:
+        ...
+
+    @property
+    def pending_depth(self) -> int:
+        ...
+
+    @property
+    def in_flight_depth(self) -> int:
+        ...
+
+    @property
+    def oldest_pending_age_seconds(self) -> float:
         ...
 
 
@@ -335,6 +359,8 @@ class SegmentAdmissionQueue:
                 list[ProfileSegmentIdentity],
             ] = {}
             for identity in self._items:
+                if identity in self._protected:
+                    continue
                 key = (
                     identity.profile_name,
                     identity.variant_stable_id,
@@ -355,10 +381,7 @@ class SegmentAdmissionQueue:
                     ]
                 )
                 for identity in ordered:
-                    if (
-                        identity.sequence in retained_sequences
-                        or identity in self._protected
-                    ):
+                    if identity.sequence in retained_sequences:
                         continue
                     del self._items[identity]
                     self._suppress(identity, now)
@@ -383,13 +406,16 @@ class SegmentAdmissionQueue:
             for identity in identities:
                 if self._items.pop(identity, None) is not None:
                     self._suppress(identity, now)
+                self._protected.discard(identity)
 
     def protect(
         self,
         identities: Iterable[ProfileSegmentIdentity],
     ) -> None:
         with self._lock:
-            self._protected.update(identities)
+            self._protected.update(
+                identity for identity in identities if identity in self._items
+            )
 
     def release(
         self,
@@ -400,19 +426,58 @@ class SegmentAdmissionQueue:
 
     @property
     def depth(self) -> int:
-        with self._lock:
-            return len(self._items)
+        return self.pressure_snapshot().retained_depth
+
+    @property
+    def pending_depth(self) -> int:
+        return self.pressure_snapshot().pending_depth
+
+    @property
+    def in_flight_depth(self) -> int:
+        return self.pressure_snapshot().in_flight_depth
 
     @property
     def oldest_age_seconds(self) -> float:
+        return self.pressure_snapshot().oldest_retained_age_seconds
+
+    @property
+    def oldest_pending_age_seconds(self) -> float:
+        return self.pressure_snapshot().oldest_pending_age_seconds
+
+    def pressure_snapshot(self) -> AdmissionQueuePressure:
         now = self.clock()
         with self._lock:
-            if not self._items:
-                return 0.0
-            oldest = min(
+            pending_times = [
+                item.admitted_at
+                for identity, item in self._items.items()
+                if identity not in self._protected
+            ]
+            retained_times = [
                 item.admitted_at for item in self._items.values()
+            ]
+            retained_depth = len(self._items)
+            in_flight_depth = sum(
+                identity in self._protected for identity in self._items
             )
-            return max(0.0, now - oldest)
+            return AdmissionQueuePressure(
+                pending_depth=retained_depth - in_flight_depth,
+                in_flight_depth=in_flight_depth,
+                retained_depth=retained_depth,
+                oldest_pending_age_seconds=self._oldest_age(
+                    pending_times,
+                    now,
+                ),
+                oldest_retained_age_seconds=self._oldest_age(
+                    retained_times,
+                    now,
+                ),
+            )
+
+    @staticmethod
+    def _oldest_age(admitted_at: list[float], now: float) -> float:
+        if not admitted_at:
+            return 0.0
+        return max(0.0, now - min(admitted_at))
 
     @staticmethod
     def identity_for(

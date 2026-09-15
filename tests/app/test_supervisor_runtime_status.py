@@ -146,6 +146,9 @@ def test_running_and_healthy_telemetry_mapped_correctly():
     redis.hashes[keys.metrics(storage_id)] = {
         "finished_at": "2026-08-26T10:05:00+00:00",
         "queue_depth": "4",
+        "pending_work_count": "3",
+        "in_flight_work_count": "2",
+        "retained_work_count": "5",
         "queue_lag_seconds": "1.500000",
         "live_edge_lag_seconds": "3.250000",
         "admission_mode": "live_edge_protection",
@@ -172,7 +175,10 @@ def test_running_and_healthy_telemetry_mapped_correctly():
     assert status.health is RuntimeHealth.HEALTHY
     assert status.health_reasons == ("playlist_ok", "segments_decoding")
     assert status.active_variant_count == 2
-    assert status.queue_depth == 4
+    assert status.queue_depth == 3
+    assert status.pending_work_count == 3
+    assert status.in_flight_work_count == 2
+    assert status.retained_work_count == 5
     assert status.queue_lag_seconds == 1.5
     assert status.live_edge_lag_seconds == 3.25
     assert status.started_at == datetime(2026, 8, 26, 10, 0, 0, tzinfo=timezone.utc)
@@ -195,6 +201,7 @@ def test_running_and_healthy_telemetry_mapped_correctly():
     assert status.checks == {
         "black_screen": CheckStatus.ENABLED,
         "video_freeze": CheckStatus.DISABLED,
+        "macroblocking": CheckStatus.DISABLED,
         "audio_loss": CheckStatus.DISABLED,
     }
 

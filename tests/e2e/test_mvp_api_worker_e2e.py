@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from queue import Empty, Queue
 import shutil
-import subprocess
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 import time
@@ -20,6 +19,7 @@ from presentation.api.main import create_app
 from presentation.api.settings import ApiSettings
 from scripts.generate_audio_loss_fixtures import generate_fixtures as generate_audio_fixtures
 from scripts.publish_live_hls import HLS_ROOT, publish
+from tests.e2e.black_rule_fixture import generate_black_rule_vod
 
 pytestmark = [
     pytest.mark.mvp_e2e,
@@ -41,57 +41,6 @@ def _check_prerequisites():
         if os.getenv("REQUIRE_MVP_E2E") == "1":
             pytest.fail("FFmpeg and FFprobe are required for MVP media E2E tests")
         pytest.skip("FFmpeg/FFprobe is not installed on the system")
-
-
-def _generate_black_screen_vod(output_dir: Path, segment_duration: float = 1.0) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    playlist_path = output_dir / "stream.m3u8"
-    master_path = output_dir / "master.m3u8"
-
-    cmd = [
-        shutil.which("ffmpeg"),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        "color=c=black:s=128x72:r=10:d=6",
-        "-f",
-        "lavfi",
-        "-i",
-        "color=c=blue:s=128x72:r=10:d=4",
-        "-filter_complex",
-        "[0:v][1:v]concat=n=2:v=1:a=0[v]",
-        "-map",
-        "[v]",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-g",
-        "10",
-        "-an",
-        "-f",
-        "hls",
-        "-hls_time",
-        str(segment_duration),
-        "-hls_list_size",
-        "0",
-        "-hls_segment_filename",
-        str(output_dir / "seg_%03d.ts"),
-        str(playlist_path),
-    ]
-    subprocess.run(cmd, check=True, timeout=20)
-
-    master_content = (
-        "#EXTM3U\n"
-        "#EXT-X-VERSION:3\n"
-        '#EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=128x72\n'
-        "stream.m3u8\n"
-    )
-    master_path.write_text(master_content, encoding="utf-8")
 
 
 def _poll_until(predicate, timeout=10.0, interval=0.1, description="condition"):
@@ -149,7 +98,7 @@ def test_mvp_black_screen_api_to_worker_e2e(redis_context, probe):
         source_dir = temp_path / "source"
         live_dir = temp_path / "live"
         live_dir.mkdir(parents=True, exist_ok=True)
-        _generate_black_screen_vod(source_dir, segment_duration=1.0)
+        generate_black_rule_vod(source_dir, segment_duration=1.0)
 
         handler = partial(QuietHandler, directory=str(temp_path))
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -264,11 +213,29 @@ def test_mvp_black_screen_api_to_worker_e2e(redis_context, probe):
                     assert status_json["worker_id"] == worker_id
                     assert "storage_id" not in status_json
 
+                    repeated_open = _wait_websocket_alert(
+                        ws_messages,
+                        event_type="REPEATED_BLACK_SCREEN",
+                        state="OPEN",
+                        timeout=45.0,
+                    )
+                    repeated_resolved = _wait_websocket_alert(
+                        ws_messages,
+                        event_type="REPEATED_BLACK_SCREEN",
+                        state="RESOLVED",
+                        timeout=45.0,
+                    )
+                    assert (
+                        repeated_resolved["payload"]["event_id"]
+                        == repeated_open["payload"]["event_id"]
+                    )
+
                     # 5. Receive real BLACK_SCREEN alert from WebSocket
                     msg = _wait_websocket_alert(
                         ws_messages,
                         event_type="BLACK_SCREEN",
                         state="OPEN",
+                        timeout=45.0,
                     )
                     assert msg["message_type"] == "ALERT"
                     assert msg["stream_id"] == stream_id
@@ -283,6 +250,7 @@ def test_mvp_black_screen_api_to_worker_e2e(redis_context, probe):
                         ws_messages,
                         event_type="BLACK_SCREEN",
                         state="RESOLVED",
+                        timeout=45.0,
                     )
                     assert resolved_msg["payload"]["event_id"] == payload["event_id"]
 
