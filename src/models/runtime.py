@@ -23,6 +23,9 @@ class LiveCycleStats:
     backpressure_deferred_work_count: int = 0
 
     queue_depth: int = 0
+    pending_work_count: int = 0
+    in_flight_work_count: int = 0
+    retained_work_count: int = 0
     queue_lag_seconds: float = 0.0
     live_edge_lag_seconds: float | None = None
     admission_mode: str = "coverage"
@@ -36,6 +39,7 @@ class LiveCycleStats:
     dropped_media_segment_count: int = 0
     active_media_processes: int = 0
     max_media_processes: int = 0
+    peak_active_media_processes: int = 0
 
     playlist_fetch_latency_seconds: float = 0.0
     playlist_staleness_seconds: float = 0.0

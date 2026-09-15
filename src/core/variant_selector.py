@@ -50,6 +50,18 @@ def select_variants(
         for variant in variants
         if variant.rendition_kind is MediaRenditionKind.AUDIO
     ]
+    if policy.mode is VariantSelectionMode.HIGHEST_QUALITY:
+        if not video:
+            raise VariantSelectionError("No video variant is available")
+        selected_video = max(video, key=_quality_key)
+        selected_audio = _preferred_audio_rendition(
+            audio,
+            group_id=selected_video.audio_group,
+        )
+        return [selected_video] + (
+            [selected_audio] if selected_audio is not None else []
+        )
+
     ranked = sorted(video, key=_quality_key)
     selected_video = _evenly_spaced(ranked, policy.representative_count)
     selected_audio_groups = {
@@ -71,7 +83,26 @@ def _quality_key(variant: Variant) -> tuple[int, int, str]:
         if variant.resolution is not None
         else 0
     )
-    return (variant.bandwidth or 0, pixels, variant.stable_id)
+    return (pixels, variant.bandwidth or 0, variant.stable_id)
+
+
+def _preferred_audio_rendition(
+    variants: list[Variant],
+    *,
+    group_id: str | None,
+) -> Variant | None:
+    if group_id is None:
+        return None
+    candidates = [
+        variant for variant in variants if variant.audio_group == group_id
+    ]
+    for candidate in candidates:
+        if candidate.is_default:
+            return candidate
+    for candidate in candidates:
+        if candidate.autoselect:
+            return candidate
+    return candidates[0] if candidates else None
 
 
 def _evenly_spaced(variants: list[Variant], count: int) -> list[Variant]:

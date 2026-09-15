@@ -26,7 +26,7 @@ class VideoFreezeCheck(PresentationDTO):
     noise_db: float = Field(default=-60.0, le=0)
     detector_minimum_duration: float = Field(default=0.2, gt=0)
     warning_duration_seconds: float = Field(default=3.0, gt=0)
-    alert_duration_seconds: float = Field(default=5.0, gt=0)
+    alert_duration_seconds: float = Field(default=60.0, gt=0)
 
     @model_validator(mode="after")
     def validate_threshold_order(self):
@@ -36,6 +36,10 @@ class VideoFreezeCheck(PresentationDTO):
                 "warning_duration_seconds"
             )
         return self
+
+
+class MacroblockingCheck(PresentationDTO):
+    enabled: bool = False
 
 
 class AdmissionConfig(PresentationDTO):
@@ -68,7 +72,9 @@ class AdmissionConfig(PresentationDTO):
 
 
 class VariantSelectionConfig(PresentationDTO):
-    mode: Literal["all", "representative", "explicit"] = "all"
+    mode: Literal[
+        "highest_quality", "all", "representative", "explicit"
+    ] = "highest_quality"
     representative_count: int = Field(default=3, gt=0)
     explicit_variant_ids: List[str] = Field(default_factory=list)
 
@@ -90,6 +96,9 @@ class StreamChecks(PresentationDTO):
     audio_loss: AudioLossCheck
     video_freeze: VideoFreezeCheck = Field(
         default_factory=VideoFreezeCheck
+    )
+    macroblocking: MacroblockingCheck = Field(
+        default_factory=MacroblockingCheck
     )
 
 # DTO: Data Transfer Object dùng để nhận request tạo stream mới từ UI
@@ -161,6 +170,7 @@ class EventType(str, Enum):
     AUDIO_LOSS = "AUDIO_LOSS"
     VIDEO_FREEZE = "VIDEO_FREEZE"
     REPEATED_VIDEO_FREEZE = "REPEATED_VIDEO_FREEZE"
+    MACROBLOCKING = "MACROBLOCKING"
     RUNTIME_HEALTH = "RUNTIME_HEALTH"
 
 # Trạng thái của sự kiện: Bắt đầu (OPEN), Cập nhật (UPDATE), Đã giải quyết (RESOLVED)
@@ -254,6 +264,9 @@ class RuntimeStatusDTO(PresentationDTO):
     profile_analysis_total: Dict[str, int] = Field(default_factory=dict)
     active_media_processes: int = Field(default=0, ge=0)
     max_media_processes: int = Field(default=0, ge=0)
+    pending_work_count: int = Field(default=0, ge=0)
+    in_flight_work_count: int = Field(default=0, ge=0)
+    retained_work_count: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_media_process_capacity(self):

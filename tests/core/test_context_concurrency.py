@@ -1,6 +1,7 @@
 from threading import Event, Lock
 
 from core import context
+from models.variant_selection import VariantSelectionPolicy
 from playlist.master_parser import Variant
 from tests.factories.hls import make_snapshot
 
@@ -52,6 +53,7 @@ def test_media_playlists_are_fetched_with_bounded_concurrency(
     result = context.build_monitoring_context(
         "https://media.test/master.m3u8",
         media_playlist_workers=2,
+        variant_selection=VariantSelectionPolicy(mode="all"),
     )
 
     assert peak == 2

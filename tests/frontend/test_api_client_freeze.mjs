@@ -4,7 +4,7 @@ import test from 'node:test';
 import { ApiClient } from '../../src/presentation/static/js/api-client.js';
 
 
-test('START payload carries explicit freeze configuration', async () => {
+test('START payload carries video check config and forces highest quality', async () => {
     let request = null;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url, options) => {
@@ -27,8 +27,8 @@ test('START payload carries explicit freeze configuration', async () => {
             null,
             {
                 videoFreezeEnabled: true,
-                variantSelectionMode: 'representative',
-                representativeVariantCount: 3
+                macroblockingEnabled: true,
+                variantSelectionMode: 'all'
             }
         );
         const payload = JSON.parse(request.options.body);
@@ -37,10 +37,11 @@ test('START payload carries explicit freeze configuration', async () => {
         assert.equal(payload.checks.video_freeze.enabled, true);
         assert.equal(payload.checks.video_freeze.noise_db, -60.0);
         assert.equal(payload.checks.video_freeze.warning_duration_seconds, 3.0);
-        assert.equal(payload.checks.video_freeze.alert_duration_seconds, 5.0);
+        assert.equal(payload.checks.video_freeze.alert_duration_seconds, 60.0);
+        assert.deepEqual(payload.checks.macroblocking, { enabled: true });
         assert.deepEqual(payload.variant_selection, {
-            mode: 'representative',
-            representative_count: 3,
+            mode: 'highest_quality',
+            representative_count: 1,
             explicit_variant_ids: []
         });
     } finally {

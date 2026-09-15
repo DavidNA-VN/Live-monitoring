@@ -23,14 +23,13 @@
             <form id="stream-form" class="url-input-form">
                 <input type="text" id="stream-id" value="channel-01" required placeholder="Stream ID (VD: ch-01)" class="small-input">
                 <input type="url" id="master-url" value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" required placeholder="Nhập HLS Master URL (.m3u8)">
-                <select id="variant-selection" title="Variant monitoring policy">
-                    <option value="representative:2" selected>2 variants</option>
-                    <option value="representative:3">3 variants</option>
-                    <option value="all">All variants</option>
-                </select>
                 <label class="check-option" title="Enable video freeze detection">
                     <input type="checkbox" id="check-video-freeze">
                     <span>Freeze</span>
+                </label>
+                <label class="check-option" title="Enable macroblocking detection">
+                    <input type="checkbox" id="check-macroblocking">
+                    <span>Macroblocking</span>
                 </label>
                 <button type="submit" class="btn btn-primary" id="btn-start">Connect</button>
             </form>
@@ -89,8 +88,12 @@
                             <span class="val">--</span>
                         </div>
                         <div class="stat-box" id="stat-queue-lag">
-                            <span class="label">Queue Lag</span>
+                            <span class="label">Pending Lag</span>
                             <span class="val">--</span>
+                        </div>
+                        <div class="stat-box" id="stat-queue-work">
+                            <span class="label">Pending / In Flight</span>
+                            <span class="val">0 / 0</span>
                         </div>
                         <div class="stat-box" id="stat-coverage-gaps">
                             <span class="label">Coverage Gaps</span>

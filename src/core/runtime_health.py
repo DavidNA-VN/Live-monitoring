@@ -137,6 +137,9 @@ class RedisRuntimeHealthReporter:
                 stats.backpressure_deferred_work_count
             ),
             "queue_depth": stats.queue_depth,
+            "pending_work_count": stats.pending_work_count,
+            "in_flight_work_count": stats.in_flight_work_count,
+            "retained_work_count": stats.retained_work_count,
             "queue_lag_seconds": f"{stats.queue_lag_seconds:.6f}",
             "live_edge_lag_seconds": (
                 ""
@@ -164,6 +167,9 @@ class RedisRuntimeHealthReporter:
             ),
             "active_media_processes": stats.active_media_processes,
             "max_media_processes": stats.max_media_processes,
+            "peak_active_media_processes": (
+                stats.peak_active_media_processes
+            ),
             "playlist_fetch_latency_seconds": (
                 f"{stats.playlist_fetch_latency_seconds:.6f}"
             ),
@@ -180,6 +186,13 @@ class RedisRuntimeHealthReporter:
             "retry_total": stats.retry_total,
             "ffmpeg_timeout_total": stats.ffmpeg_timeout_total,
         }
+        mapping.update(
+            {
+                name: value
+                for name, value in stats.profile_metrics.items()
+                if self._is_profile_gauge(name)
+            }
+        )
         try:
             pipeline = self.redis.pipeline(transaction=True)
             pipeline.hset(
@@ -223,7 +236,7 @@ class RedisRuntimeHealthReporter:
                 if value:
                     pipeline.hincrby(metrics_key, name, value)
             for name, value in stats.profile_metrics.items():
-                if not value:
+                if not value or self._is_profile_gauge(name):
                     continue
                 if isinstance(value, int):
                     pipeline.hincrby(metrics_key, name, value)
@@ -244,6 +257,10 @@ class RedisRuntimeHealthReporter:
             raise RedisUnavailableError(
                 f"Unable to publish runtime metrics: {exc}"
             ) from exc
+
+    @staticmethod
+    def _is_profile_gauge(name: str) -> bool:
+        return name.endswith(("_max", "_p50", "_p95", "_p99"))
 
     def _publish(
         self,

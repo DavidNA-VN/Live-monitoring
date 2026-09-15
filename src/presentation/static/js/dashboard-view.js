@@ -1,14 +1,14 @@
-import { presentAlert } from './alert-presentation.js?v=6.0';
+import { presentAlert, safeSegmentUrl } from './alert-presentation.js?v=7.0';
 
 export class DashboardView {
     constructor() {
         this.streamForm = document.getElementById('stream-form');
         this.streamIdInput = document.getElementById('stream-id');
         this.masterUrlInput = document.getElementById('master-url');
-        this.variantSelectionInput = document.getElementById(
-            'variant-selection'
-        );
         this.freezeEnabledInput = document.getElementById('check-video-freeze');
+        this.macroblockingEnabledInput = document.getElementById(
+            'check-macroblocking'
+        );
         this.startBtn = document.getElementById('btn-start');
         this.pauseBtn = document.getElementById('btn-pause');
         this.resumeBtn = document.getElementById('btn-resume');
@@ -27,6 +27,7 @@ export class DashboardView {
             '#stat-admission-mode .val'
         );
         this.statQueueLag = document.querySelector('#stat-queue-lag .val');
+        this.statQueueWork = document.querySelector('#stat-queue-work .val');
         this.statCoverageGaps = document.querySelector(
             '#stat-coverage-gaps .val'
         );
@@ -72,6 +73,9 @@ export class DashboardView {
         if (this.freezeEnabledInput) {
             this.freezeEnabledInput.disabled = !isIdle;
         }
+        if (this.macroblockingEnabledInput) {
+            this.macroblockingEnabledInput.disabled = !isIdle;
+        }
         this.startBtn.disabled = !isIdle;
         this.pauseBtn.disabled = !isRunning;
         this.resumeBtn.disabled = !isPaused;
@@ -116,6 +120,13 @@ export class DashboardView {
                 ? `${lag.toFixed(1)} s`
                 : '--';
         }
+        if (this.statQueueWork) {
+            const pending = status.pending_work_count
+                ?? status.queue_depth
+                ?? 0;
+            const inFlight = status.in_flight_work_count ?? 0;
+            this.statQueueWork.textContent = `${pending} / ${inFlight}`;
+        }
         if (this.statCoverageGaps) {
             this.statCoverageGaps.textContent = String(
                 status.coverage_gap_count || 0
@@ -140,6 +151,8 @@ export class DashboardView {
         this.setRuntimeTelemetry({
             admission_mode: 'coverage',
             queue_lag_seconds: null,
+            pending_work_count: 0,
+            in_flight_work_count: 0,
             coverage_gap_count: 0,
             dropped_media_segment_count: 0,
             active_media_processes: 0,
@@ -204,7 +217,46 @@ export class DashboardView {
         const reason = document.createElement('span');
         reason.textContent = `${presentation.typeLabel}: ${presentation.reason}`;
         div.append(reason);
+        if (presentation.areaSummary) {
+            const area = document.createElement('div');
+            area.className = 'event-detail';
+            area.textContent = presentation.areaSummary;
+            div.append(area);
+        }
+        if (presentation.segmentRange) {
+            div.append(this._segmentRange(presentation.segmentRange));
+        }
         this._appendLog(div);
+    }
+
+    _segmentRange(range) {
+        const row = document.createElement('div');
+        row.className = 'segment-range';
+        const count = range.affectedSegmentCount
+            ? ` (${range.affectedSegmentCount} affected)`
+            : '';
+        const coverage = range.coverageComplete ? '' : ' [non-contiguous]';
+        row.append(document.createTextNode(`Segments${count}${coverage}: `));
+        row.append(this._segmentLink(range.startUri, range.startSequence));
+        if (range.endUri !== range.startUri) {
+            row.append(document.createTextNode(' -> '));
+            row.append(this._segmentLink(range.endUri, range.endSequence));
+        }
+        return row;
+    }
+
+    _segmentLink(uri, sequence) {
+        const safeUrl = safeSegmentUrl(uri);
+        const label = sequence ? `seq ${sequence}: ${uri}` : uri;
+        if (!safeUrl) {
+            return document.createTextNode(label);
+        }
+        const link = document.createElement('a');
+        link.href = safeUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = label;
+        return link;
     }
 
     _appendLog(element) {

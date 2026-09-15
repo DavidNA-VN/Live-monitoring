@@ -44,20 +44,13 @@ export class ApiClient {
         options = {}
     ) {
         const key = idempotencyKey || this.generateIdempotencyKey();
-        const variantSelectionMode = (
-            options.variantSelectionMode === 'all'
-                ? 'all'
-                : 'representative'
-        );
         const payload = {
             schema_version: "1.0",
             stream_id: streamId,
             master_url: masterUrl,
             variant_selection: {
-                mode: variantSelectionMode,
-                representative_count: (
-                    options.representativeVariantCount || 3
-                ),
+                mode: 'highest_quality',
+                representative_count: 1,
                 explicit_variant_ids: []
             },
             checks: {
@@ -73,7 +66,10 @@ export class ApiClient {
                     noise_db: -60.0,
                     detector_minimum_duration: 0.2,
                     warning_duration_seconds: 3.0,
-                    alert_duration_seconds: 5.0
+                    alert_duration_seconds: 60.0
+                },
+                macroblocking: {
+                    enabled: options.macroblockingEnabled === true
                 }
             }
         };

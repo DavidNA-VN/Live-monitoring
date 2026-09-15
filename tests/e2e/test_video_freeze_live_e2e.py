@@ -51,6 +51,11 @@ def _public_config(stream_id: str, master_url: str) -> dict:
         "schema_version": "1.0",
         "stream_id": stream_id,
         "master_url": master_url,
+        "variant_selection": {
+            "mode": "all",
+            "representative_count": 3,
+            "explicit_variant_ids": [],
+        },
         "checks": {
             "black_screen": {"enabled": False},
             "audio_loss": {
@@ -64,7 +69,7 @@ def _public_config(stream_id: str, master_url: str) -> dict:
                 "noise_db": -60.0,
                 "detector_minimum_duration": 0.2,
                 "warning_duration_seconds": 3.0,
-                "alert_duration_seconds": 5.0,
+                "alert_duration_seconds": 60.0,
             },
         },
     }
@@ -185,7 +190,7 @@ def _running_freeze_case(
     assert publisher_errors == []
 
 
-def test_freeze_warning_escalation_and_resolution_on_two_variants(
+def test_continuous_freeze_opens_and_resolves_on_two_variants(
     redis_context,
     probe,
     freeze_fixture_root,
@@ -194,7 +199,7 @@ def test_freeze_warning_escalation_and_resolution_on_two_variants(
     fixtures = freeze_fixture_root
     stream_id = "freeze-live-escalation"
     with _running_freeze_case(
-        source=fixtures / "freeze_5_2s",
+        source=fixtures / "freeze_60s",
         client=client,
         namespace=namespace,
         probe=probe,
@@ -212,14 +217,13 @@ def test_freeze_warning_escalation_and_resolution_on_two_variants(
             complete = [
                 items
                 for items in grouped.values()
-                if [item.state for item in items]
-                == ["OPEN", "UPDATE", "RESOLVED"]
+                if [item.state for item in items] == ["OPEN", "RESOLVED"]
             ]
             return complete if len(complete) == 2 else None
 
         lifecycles = probe.wait_until(
             complete_lifecycles,
-            timeout=35.0,
+            timeout=55.0,
             description="two freeze alert lifecycles",
         )
 
@@ -230,16 +234,12 @@ def test_freeze_warning_escalation_and_resolution_on_two_variants(
     assert None not in variant_ids
     assert len(variant_ids) == 2
     for items in lifecycles:
-        assert [item.attributes["severity"] for item in items] == [
-            "WARNING",
-            "ALERT",
-            "ALERT",
-        ]
-        assert items[-1].reason == "video_returned"
+        assert all(item.attributes["severity"] == "ALERT" for item in items)
+        assert items[-1].reason == "healthy_segment_confirmed"
         assert len({item.event_id for item in items}) == 1
 
 
-def test_three_warning_freezes_emit_one_repeated_alert_per_variant(
+def test_three_short_freezes_emit_and_resolve_repeated_alert_per_variant(
     redis_context,
     probe,
     freeze_fixture_root,
@@ -248,29 +248,38 @@ def test_three_warning_freezes_emit_one_repeated_alert_per_variant(
     fixtures = freeze_fixture_root
     stream_id = "freeze-live-repeated"
     with _running_freeze_case(
-        source=fixtures / "three_warning_freezes",
+        source=fixtures / "three_short_freezes",
         client=client,
         namespace=namespace,
         probe=probe,
         stream_id=stream_id,
     ):
-        def repeated_alerts():
+        def repeated_lifecycles():
             items = [
                 item
                 for item in probe.read_alerts(stream_id)
                 if item.event_type == "REPEATED_VIDEO_FREEZE"
-                and item.state == "OPEN"
             ]
-            return items if len(items) == 2 else None
+            grouped = {}
+            for item in items:
+                grouped.setdefault(item.event_id, []).append(item)
+            complete = [
+                lifecycle
+                for lifecycle in grouped.values()
+                if [item.state for item in lifecycle] == ["OPEN", "RESOLVED"]
+            ]
+            return complete if len(complete) == 2 else None
 
-        alerts = probe.wait_until(
-            repeated_alerts,
+        lifecycles = probe.wait_until(
+            repeated_lifecycles,
             timeout=45.0,
-            description="repeated freeze alerts for both variants",
+            description="repeated freeze lifecycles for both variants",
         )
 
+    alerts = [item for lifecycle in lifecycles for item in lifecycle]
     variant_ids = {item.variant_stable_id for item in alerts}
     assert None not in variant_ids
     assert len(variant_ids) == 2
     assert all(item.attributes["severity"] == "ALERT" for item in alerts)
     assert all(item.attributes["occurrences"] == "3" for item in alerts)
+    assert all(len({item.event_id for item in lifecycle}) == 1 for lifecycle in lifecycles)

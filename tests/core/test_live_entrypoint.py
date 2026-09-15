@@ -58,6 +58,7 @@ def test_live_entrypoint_exposes_resource_pool_tuning_options():
     assert args.max_service_media_processes == 8
     assert args.video_decode_workers == 6
     assert args.audio_decode_workers == 2
+    assert args.variant_selection == "highest_quality"
 
 
 def test_live_entrypoint_exposes_startup_admission_policy():

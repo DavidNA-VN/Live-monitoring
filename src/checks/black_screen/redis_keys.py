@@ -81,6 +81,13 @@ class BlackScreenRedisKeys:
             stream_id, variant_stable_id, timeline_generation, "short-duration"
         )
 
+    def alert_recovery(
+        self,
+        stream_id: str,
+        variant_stable_id: str,
+    ) -> str:
+        return f"{self._variant(stream_id, variant_stable_id)}:alert-recovery"
+
     def _timeline_key(
         self,
         stream_id: str,

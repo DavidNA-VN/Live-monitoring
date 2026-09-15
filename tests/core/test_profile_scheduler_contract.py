@@ -111,6 +111,10 @@ def test_profiles_of_different_resource_classes_use_separate_pools():
         assert scheduler.executors_by_resource[
             AnalysisResourceClass.AUDIO_DECODE
         ].max_workers == 1
+        assert scheduler._batch_limit(video) == 2
+        assert scheduler._batch_limit(audio) == 4
+        assert scheduler._parallel_analysis_limit(video) == 1
+        assert scheduler._parallel_analysis_limit(audio) == 2
     finally:
         scheduler.shutdown()
 
@@ -230,6 +234,111 @@ def test_scheduler_enters_catch_up_from_observed_queue_pressure():
         assert scheduler.admission_controller.mode is AdmissionMode.CATCH_UP
         assert stats.admission_mode == "catch_up"
         assert stats.admission_mode_transition_count == 1
+    finally:
+        scheduler.shutdown()
+
+
+def test_video_profile_uses_realtime_micro_batch_default():
+    profile = FakeProfile()
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[profile],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+    )
+    try:
+        assert scheduler._batch_limit(profile) == 2
+        scheduler.max_segments_per_batch = 1
+        assert scheduler._batch_limit(profile) == 1
+    finally:
+        scheduler.shutdown()
+
+
+def test_parallel_analysis_policy_can_be_tuned_per_resource():
+    profile = FakeProfile()
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[profile],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=2,
+        parallel_analysis_by_resource={
+            AnalysisResourceClass.VIDEO_DECODE: 2,
+        },
+    )
+    try:
+        assert scheduler._parallel_analysis_limit(profile) == 2
+    finally:
+        scheduler.shutdown()
+
+
+def test_parallel_analysis_policy_rejects_non_positive_limit():
+    with pytest.raises(ValueError, match="parallel analysis limits"):
+        ProfileScheduler(
+            stream=build_stream_identity(
+                "https://example.test/master.m3u8",
+                "channel-01",
+            ),
+            state_store=FakeStateStore(),
+            processors=[],
+            analysis_profiles=[FakeProfile()],
+            resource_limits=default_resource_limits(),
+            max_concurrent_media_processes=1,
+            parallel_analysis_by_resource={
+                AnalysisResourceClass.VIDEO_DECODE: 0,
+            },
+        )
+
+
+def test_scheduler_does_not_treat_inflight_age_as_queue_pressure():
+    now = [0.0]
+    queue = SegmentAdmissionQueue(
+        max_items=10,
+        max_age_seconds=100,
+        clock=lambda: now[0],
+    )
+    queue.admit(
+        profile_name="video_realtime",
+        segments=[make_segment(10)],
+    )
+    queue.protect([queue.snapshot()[0].identity])
+    scheduler = ProfileScheduler(
+        stream=build_stream_identity(
+            "https://example.test/master.m3u8",
+            "channel-01",
+        ),
+        state_store=FakeStateStore(),
+        processors=[],
+        analysis_profiles=[FakeProfile()],
+        resource_limits=default_resource_limits(),
+        max_concurrent_media_processes=1,
+        admission_queue=queue,
+        admission_policy=LiveAdmissionPolicy(transition_cycles=1),
+    )
+    now[0] = 30.0
+    try:
+        stats = LiveCycleStats(started_at=datetime.now(timezone.utc))
+        scheduler.observe_queue_pressure(
+            target_duration=2.0,
+            stats=stats,
+        )
+        scheduler._record_queue_metrics(stats)
+
+        assert scheduler.admission_controller.mode is AdmissionMode.COVERAGE
+        assert stats.queue_depth == 0
+        assert stats.pending_work_count == 0
+        assert stats.in_flight_work_count == 1
+        assert stats.retained_work_count == 1
+        assert stats.queue_lag_seconds == 0
     finally:
         scheduler.shutdown()
 
@@ -377,6 +486,11 @@ def test_global_media_process_gate_caps_cross_pool_analysis():
     class ConcurrentProfile:
         def __init__(self, resource_class, tracker):
             self.resource_class = resource_class
+            self.name = (
+                "audio_realtime"
+                if resource_class is AnalysisResourceClass.AUDIO_DECODE
+                else "video_realtime"
+            )
             self.tracker = tracker
 
         def analyze(self, _segment, *, requirements):

@@ -33,6 +33,26 @@ class RedisVideoFreezeEventRepository:
         )
         return self.codec.decode(raw) if raw else None
 
+    def load_event(self, variant_stable_id: str, event_id: str) -> VideoFreezeLiveEvent | None:
+        raw = self.redis.get(
+            self.keys.event(self.storage_id, variant_stable_id, event_id)
+        )
+        return self.codec.decode(raw) if raw else None
+
+    def load_event(self, variant_stable_id: str, event_id: str) -> VideoFreezeLiveEvent | None:
+        raw = self.redis.get(
+            self.keys.event(self.storage_id, variant_stable_id, event_id)
+        )
+        return self.codec.decode(raw) if raw else None
+
+    def load_event(
+        self, variant_stable_id: str, event_id: str
+    ) -> VideoFreezeLiveEvent | None:
+        raw = self.redis.get(
+            self.keys.event(self.storage_id, variant_stable_id, event_id)
+        )
+        return self.codec.decode(raw) if raw else None
+
     def queue_persist_open(
         self,
         pipeline,
@@ -107,6 +127,59 @@ class RedisVideoFreezeEventRepository:
             )
         if reason == "observation_gap":
             self.alerts.add_interrupted_metric(pipeline)
+
+    def queue_close_canonical(self, pipeline, *, event: VideoFreezeLiveEvent) -> None:
+        pipeline.set(
+            self.keys.event(self.storage_id, event.variant_stable_id, event.event_id),
+            self.codec.encode(event), ex=self.event_ttl_seconds,
+        )
+        pipeline.delete(self.keys.open_event(self.storage_id, event.variant_stable_id))
+
+    def queue_close_canonical(
+        self,
+        pipeline,
+        *,
+        event: VideoFreezeLiveEvent,
+        opening_notification: tuple[
+            str, VideoFreezeSeverity, str
+        ] | None = None,
+    ) -> None:
+        payload = self.codec.encode(event)
+        pipeline.set(
+            self.keys.event(
+                self.storage_id, event.variant_stable_id, event.event_id
+            ),
+            payload,
+            ex=self.event_ttl_seconds,
+        )
+        pipeline.delete(
+            self.keys.open_event(self.storage_id, event.variant_stable_id)
+        )
+        if opening_notification is not None:
+            state, severity, reason = opening_notification
+            self.alerts.add_event(
+                pipeline,
+                event=event,
+                state=state,
+                severity=severity,
+                reason=reason,
+            )
+
+    def queue_resolve_continuous_alert(
+        self,
+        pipeline,
+        *,
+        event: VideoFreezeLiveEvent,
+        reason: str,
+    ) -> None:
+        severity = event.highest_severity or VideoFreezeSeverity.ALERT
+        self.alerts.add_event(
+            pipeline,
+            event=event,
+            state="RESOLVED",
+            severity=severity,
+            reason=reason,
+        )
 
     def queue_commit(self, pipeline, commit_key: str) -> None:
         pipeline.set(commit_key, "1", ex=self.commit_ttl_seconds)

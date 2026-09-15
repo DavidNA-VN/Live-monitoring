@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    presentAlert
+    presentAlert,
+    safeSegmentUrl
 } from '../../src/presentation/static/js/alert-presentation.js';
 
 
@@ -84,4 +85,50 @@ test('repeated freeze uses the shared alert presentation contract', () => {
 
     assert.equal(result.visualClass, 'error');
     assert.equal(result.typeLabel, 'Repeated video freeze');
+});
+
+
+test('content alert exposes a bounded segment range', () => {
+    const result = presentAlert({
+        event_type: 'VIDEO_FREEZE',
+        state: 'OPEN',
+        attributes: {
+            start_sequence: '100',
+            end_sequence: '102',
+            start_segment_uri: 'https://cdn.test/100.ts',
+            end_segment_uri: 'https://cdn.test/102.ts',
+            affected_segment_count: '3',
+            coverage_complete: 'true'
+        }
+    });
+
+    assert.deepEqual(result.segmentRange, {
+        startUri: 'https://cdn.test/100.ts',
+        endUri: 'https://cdn.test/102.ts',
+        startSequence: '100',
+        endSequence: '102',
+        affectedSegmentCount: '3',
+        coverageComplete: true
+    });
+    assert.equal(safeSegmentUrl('https://cdn.test/100.ts'), 'https://cdn.test/100.ts');
+    assert.equal(safeSegmentUrl('javascript:alert(1)'), null);
+});
+
+
+test('macroblocking exposes area summary and safe segment range', () => {
+    const result = presentAlert({
+        event_type: 'MACROBLOCKING',
+        state: 'OPEN',
+        attributes: {
+            average_affected_area_ratio: '0.175',
+            peak_affected_area_ratio: '0.31',
+            start_sequence: '100',
+            end_sequence: '101',
+            start_segment_uri: 'https://cdn.test/100.ts',
+            end_segment_uri: 'https://cdn.test/101.ts'
+        }
+    });
+    assert.equal(result.typeLabel, 'Macroblocking');
+    assert.equal(result.areaSummary, 'Affected area: avg 17.5%, peak 31.0%');
+    assert.equal(result.segmentRange.endSequence, '101');
 });

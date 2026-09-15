@@ -293,6 +293,7 @@ def test_existing_command_and_alert_enums_unmodified():
         "AUDIO_LOSS",
         "VIDEO_FREEZE",
         "REPEATED_VIDEO_FREEZE",
+        "MACROBLOCKING",
         "RUNTIME_HEALTH",
     ]
     assert alert_schema["properties"]["state"]["enum"] == [

@@ -89,6 +89,47 @@ def test_freeze_only_composition_uses_one_video_profile():
         components.close()
 
 
+def test_macroblocking_only_uses_one_video_profile_and_one_processor():
+    components = build(
+        config(
+            black_screen_enabled=False,
+            audio_loss_enabled=False,
+            macroblocking_enabled=True,
+        )
+    )
+    try:
+        assert [profile.name for profile in components.profiles] == [
+            "video_realtime"
+        ]
+        assert [processor.name for processor in components.processors] == [
+            "macroblocking"
+        ]
+        assert components.profiles[0].enable_macroblocking is True
+    finally:
+        components.close()
+
+
+def test_all_video_checks_share_one_video_profile():
+    components = build(
+        config(
+            audio_loss_enabled=False,
+            video_freeze_enabled=True,
+            macroblocking_enabled=True,
+        )
+    )
+    try:
+        assert [profile.name for profile in components.profiles] == [
+            "video_realtime"
+        ]
+        assert [processor.name for processor in components.processors] == [
+            "black_screen",
+            "video_freeze",
+            "macroblocking",
+        ]
+    finally:
+        components.close()
+
+
 def test_black_and_freeze_share_one_video_profile_and_decode_budget():
     components = build(
         config(

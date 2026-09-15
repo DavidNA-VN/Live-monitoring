@@ -39,6 +39,7 @@ def test_alert_contract_matches_current_detection_cases():
         "AUDIO_LOSS",
         "VIDEO_FREEZE",
         "REPEATED_VIDEO_FREEZE",
+        "MACROBLOCKING",
         "RUNTIME_HEALTH",
     ]
     assert properties["state"]["enum"] == [
@@ -76,6 +77,7 @@ def test_stream_config_exposes_only_public_identity():
         "black_screen",
         "audio_loss",
         "video_freeze",
+        "macroblocking",
     }
 
 
@@ -98,7 +100,7 @@ def test_video_freeze_config_is_optional_with_safe_defaults():
         "noise_db": -60.0,
         "detector_minimum_duration": 0.2,
         "warning_duration_seconds": 3.0,
-        "alert_duration_seconds": 5.0,
+        "alert_duration_seconds": 60.0,
     }
 
 

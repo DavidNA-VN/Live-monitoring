@@ -53,6 +53,11 @@ class AudioLossAlertPublisher:
             "start_media_revision": event.start_media_revision,
             "last_media_revision": event.last_media_revision,
             "channel_mode": "all_channels",
+            "start_segment_uri": event.start_segment_uri,
+            "end_segment_uri": event.end_segment_uri,
+            "start_offset_seconds": f"{event.start_offset:.6f}",
+            "end_offset_seconds": f"{event.end_offset:.6f}",
+            "coverage_complete": str(event.coverage_complete).lower(),
         }
         optional_attributes = {
             "audio_group": event.audio_group,

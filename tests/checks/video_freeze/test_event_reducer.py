@@ -13,6 +13,7 @@ from models.freeze import (
     VideoFreezeDetectionResult,
     VideoFreezeEventStatus,
 )
+from core.frame_similarity import make_gray_fingerprint
 from policies.video_freeze import VideoFreezeAlertPolicy, VideoFreezeSeverity
 from tests.factories.hls import make_segment
 
@@ -31,6 +32,25 @@ def detection(segment, *intervals, checked=True, error=None):
 
 
 def reduce(reducer, segment, *intervals, open_event=None, checked=True):
+    same_frame = make_gray_fingerprint(bytes([100] * (32 * 32)))
+    intervals = tuple(
+        replace(
+            interval,
+            start_boundary_fingerprint=(
+                interval.start_boundary_fingerprint
+                or (same_frame if interval.start <= 0.10 else None)
+            ),
+            end_boundary_fingerprint=(
+                interval.end_boundary_fingerprint
+                or (
+                    same_frame
+                    if interval.end >= segment.duration - 0.10
+                    else None
+                )
+            ),
+        )
+        for interval in intervals
+    )
     return reducer.reduce(
         open_event=open_event,
         segment=segment,
@@ -48,7 +68,7 @@ def reducer():
 def test_motion_without_open_event_marks_segment_committed():
     transition = reduce(reducer(), make_segment(10))[0]
 
-    assert transition.type is VideoFreezeEventTransitionType.MARK_COMMITTED
+    assert transition.type is VideoFreezeEventTransitionType.HEALTHY_EVIDENCE
     assert transition.event is None
     assert transition.commits_segment
 
@@ -64,7 +84,7 @@ def test_partial_freeze_resolves_when_video_returns_in_same_segment():
     )[0]
 
     event = transition.event
-    assert transition.type is VideoFreezeEventTransitionType.RESOLVE
+    assert transition.type is VideoFreezeEventTransitionType.CLOSE_EVENT
     assert transition.reason == "video_returned"
     assert transition.commits_segment
     assert event.status is VideoFreezeEventStatus.RESOLVED
@@ -117,7 +137,7 @@ def test_freeze_across_three_segments_forms_one_event():
     )[0]
 
     event = transition.event
-    assert transition.type is VideoFreezeEventTransitionType.RESOLVE
+    assert transition.type is VideoFreezeEventTransitionType.CLOSE_EVENT
     assert transition.reason == "video_returned"
     assert event.event_id == event_id
     assert event.start_sequence == 100
@@ -126,6 +146,9 @@ def test_freeze_across_three_segments_forms_one_event():
     assert event.end_offset == pytest.approx(0.8)
     assert event.duration == pytest.approx(3.6)
     assert event.affected_segment_count == 3
+    assert event.start_segment_uri.endswith("/100.ts")
+    assert event.end_segment_uri.endswith("/102.ts")
+    assert event.coverage_complete is True
 
 
 def test_reducer_does_not_mutate_loaded_event():
@@ -171,10 +194,13 @@ def test_identity_gap_resolves_old_event_and_starts_new_one(changed_segment):
     )
 
     assert [item.type for item in transitions] == [
-        VideoFreezeEventTransitionType.RESOLVE,
+        VideoFreezeEventTransitionType.UNKNOWN_GAP,
         VideoFreezeEventTransitionType.PERSIST_OPEN,
     ]
-    assert transitions[0].reason == "observation_gap"
+    assert transitions[0].reason in {
+        "observation_gap",
+        "timeline_discontinued",
+    }
     assert transitions[0].event.status is VideoFreezeEventStatus.RESOLVED
     assert transitions[1].event.event_id != opened.event_id
 
@@ -205,11 +231,15 @@ def test_timeline_reset_or_replacement_starts_new_event(field, old, new):
         open_event=opened,
     )
 
-    assert transitions[0].reason == "observation_gap"
+    assert transitions[0].reason == (
+        "timeline_discontinued"
+        if field == "timeline_generation"
+        else "observation_gap"
+    )
     assert transitions[1].event.event_id != opened.event_id
 
 
-def test_unknown_observation_preserves_open_event_without_transition():
+def test_unknown_observation_emits_unknown_gap_without_mutating_loaded_event():
     instance = reducer()
     opened = reduce(
         instance,
@@ -225,7 +255,10 @@ def test_unknown_observation_preserves_open_event_without_transition():
         checked=False,
     )
 
-    assert transitions == []
+    assert [item.type for item in transitions] == [
+        VideoFreezeEventTransitionType.UNKNOWN_GAP,
+        VideoFreezeEventTransitionType.UNKNOWN_GAP,
+    ]
     assert opened == original
 
 
@@ -237,12 +270,13 @@ def test_unknown_then_later_freeze_closes_old_event_as_observation_gap():
         FreezeInterval(0.0, 2.0),
     )[0].event
 
-    assert reduce(
+    unknown = reduce(
         instance,
         make_segment(11, duration=2.0),
         open_event=opened,
         checked=False,
-    ) == []
+    )
+    assert unknown[-1].type is VideoFreezeEventTransitionType.UNKNOWN_GAP
     transitions = reduce(
         instance,
         make_segment(12, duration=2.0),
@@ -286,8 +320,8 @@ def test_multiple_intervals_are_sorted_and_form_distinct_events():
     )
 
     assert [item.type for item in transitions] == [
-        VideoFreezeEventTransitionType.RESOLVE,
-        VideoFreezeEventTransitionType.RESOLVE,
+        VideoFreezeEventTransitionType.CLOSE_EVENT,
+        VideoFreezeEventTransitionType.CLOSE_EVENT,
     ]
     assert [item.event.start_offset for item in transitions] == [1.0, 4.0]
     assert transitions[0].event.event_id != transitions[1].event.event_id
@@ -315,45 +349,92 @@ def test_external_stream_id_is_normalized_without_changing_event_id():
     assert transition.event.event_id == opened.event_id
 
 
-def test_warning_then_alert_uses_one_event_identity():
+def test_continuous_threshold_uses_one_event_identity():
     instance = reducer()
     policy = VideoFreezeAlertPolicy()
     current = None
     event_ids = set()
 
-    for sequence in (100, 101):
-        current = reduce(
-            instance,
-            make_segment(sequence, duration=2.0),
-            FreezeInterval(0.0, 2.0),
-            open_event=current,
-        )[0].event
-        event_ids.add(current.event_id)
-
-    assert current.duration == pytest.approx(4.0)
+    current = reduce(
+        instance,
+        make_segment(100, duration=30.0),
+        FreezeInterval(0.0, 30.0),
+    )[0].event
+    event_ids.add(current.event_id)
+    assert current.duration == pytest.approx(30.0)
     assert policy.pending_notification(
         duration=current.duration,
         warning_sent=current.warning_sent,
         alert_sent=current.alert_sent,
-    ) is VideoFreezeSeverity.WARNING
-    current.warning_sent = True
-    current.highest_severity = VideoFreezeSeverity.WARNING
+    ) is None
 
     current = reduce(
         instance,
-        make_segment(102, duration=2.0),
-        FreezeInterval(0.0, 2.0),
+        make_segment(101, duration=30.0),
+        FreezeInterval(0.0, 30.0),
         open_event=current,
     )[0].event
     event_ids.add(current.event_id)
 
-    assert current.duration == pytest.approx(6.0)
+    assert current.duration == pytest.approx(60.0)
     assert policy.pending_notification(
         duration=current.duration,
         warning_sent=current.warning_sent,
         alert_sent=current.alert_sent,
     ) is VideoFreezeSeverity.ALERT
     assert len(event_ids) == 1
+
+
+def test_different_boundary_frames_split_adjacent_freezes():
+    instance = reducer()
+    first_frame = make_gray_fingerprint(bytes([80] * (32 * 32)))
+    second_frame = make_gray_fingerprint(bytes([180] * (32 * 32)))
+    first_segment = make_segment(10, duration=2.0)
+    opened = instance.reduce(
+        open_event=None,
+        segment=first_segment,
+        result=detection(
+            first_segment,
+            FreezeInterval(
+                0.0, 2.0, end_boundary_fingerprint=first_frame
+            ),
+        ),
+    )[0].event
+    second_segment = make_segment(11, duration=2.0)
+    transitions = instance.reduce(
+        open_event=opened,
+        segment=second_segment,
+        result=detection(
+            second_segment,
+            FreezeInterval(
+                0.0,
+                2.0,
+                start_boundary_fingerprint=second_frame,
+                end_boundary_fingerprint=second_frame,
+            ),
+        ),
+    )
+    assert transitions[0].type is VideoFreezeEventTransitionType.CLOSE_EVENT
+    assert transitions[0].reason == "freeze_content_changed"
+    assert transitions[1].event.event_id != opened.event_id
+
+
+def test_missing_boundary_fingerprint_fails_closed():
+    instance = reducer()
+    first = make_segment(10, duration=2.0)
+    opened = instance.reduce(
+        open_event=None,
+        segment=first,
+        result=detection(first, FreezeInterval(0.0, 2.0)),
+    )[0].event
+    second = make_segment(11, duration=2.0)
+    transitions = instance.reduce(
+        open_event=opened,
+        segment=second,
+        result=detection(second, FreezeInterval(0.0, 2.0)),
+    )
+    assert transitions[0].reason == "freeze_content_changed"
+    assert transitions[1].event.event_id != opened.event_id
 
 
 @pytest.mark.parametrize("value", [-0.1, float("nan"), float("inf")])

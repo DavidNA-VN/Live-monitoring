@@ -27,6 +27,24 @@ redis.call('DEL', KEYS[1])
 return 1
 """
 
+RELINQUISH_SEGMENT_CLAIM = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+    return 0
+end
+local attempts = tonumber(redis.call('HGET', KEYS[2], 'attempts') or '1')
+redis.call(
+    'HSET', KEYS[2],
+    'status', ARGV[2],
+    'attempts', tostring(math.max(0, attempts - 1)),
+    'updated_at', ARGV[3],
+    'last_error', ARGV[4],
+    'lease_token', ''
+)
+redis.call('EXPIRE', KEYS[2], ARGV[5])
+redis.call('DEL', KEYS[1])
+return 1
+"""
+
 ADVANCE_TIMELINE_GENERATION = """
 local current = tonumber(redis.call('GET', KEYS[1]) or '0')
 local expected = tonumber(ARGV[1])

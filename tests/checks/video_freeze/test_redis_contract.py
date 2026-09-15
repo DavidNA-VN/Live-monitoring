@@ -1,13 +1,22 @@
 from datetime import datetime, timezone
+import json
 
-from checks.video_freeze.event_codec import VideoFreezeEventCodec
+import pytest
+
+from checks.video_freeze.event_codec import (
+    VideoFreezeAlertRecoveryCodec,
+    VideoFreezeEventCodec,
+)
 from checks.video_freeze.redis_keys import VideoFreezeRedisKeys
 from core.redis_keys import RedisNamespace
 from models.freeze import (
     VideoFreezeEventStatus,
     VideoFreezeLiveEvent,
     VideoFreezeSeverity,
+    VideoFreezeAlertRecoveryState,
+    VideoFreezeAlertType,
 )
+from core.frame_similarity import make_gray_fingerprint
 
 
 def event() -> VideoFreezeLiveEvent:
@@ -35,6 +44,11 @@ def event() -> VideoFreezeLiveEvent:
         warning_sent=True,
         alert_sent=True,
         resolution_reason="video_returned",
+        reference_segment_duration=2.0,
+        detection_closed=True,
+        last_boundary_fingerprint=make_gray_fingerprint(
+            bytes([100] * (32 * 32))
+        ),
     )
 
 
@@ -52,11 +66,25 @@ def test_event_codec_reads_legacy_optional_fields_safely():
     payload = VideoFreezeEventCodec.encode(original)
     payload = payload.replace(',"highest_severity":"ALERT"', "")
     payload = payload.replace(',"timeline_generation":2', "")
+    data = json.loads(payload)
+    data.pop("reference_segment_duration", None)
+    data.pop("detection_closed", None)
+    data.pop("last_boundary_fingerprint", None)
 
-    decoded = VideoFreezeEventCodec.decode(payload)
+    decoded = VideoFreezeEventCodec.decode(json.dumps(data))
 
     assert decoded.timeline_generation == 0
     assert decoded.highest_severity is None
+    assert decoded.reference_segment_duration == original.last_segment_duration
+    assert decoded.detection_closed is False
+    assert decoded.last_boundary_fingerprint is None
+
+
+def test_event_codec_rejects_corrupt_fingerprint():
+    data = json.loads(VideoFreezeEventCodec.encode(event()))
+    data["last_boundary_fingerprint"]["pixels_base64"] = "not base64!"
+    with pytest.raises(ValueError, match="fingerprint"):
+        VideoFreezeEventCodec.decode(json.dumps(data))
 
 
 def test_keyspace_is_freeze_owned_and_full_identity_isolated():
@@ -70,3 +98,26 @@ def test_keyspace_is_freeze_owned_and_full_identity_isolated():
     assert ":stream:internal:check:video_freeze:variant:v720:" in first
     assert len({first, replacement, reset}) == 3
     assert "channel-01" not in first
+    assert keys.alert_recovery("internal", "v720") != keys.alert_recovery(
+        "internal", "v1080"
+    )
+
+
+def test_recovery_codec_round_trip_and_strict_boolean():
+    state = VideoFreezeAlertRecoveryState(
+        alert_event_id="freeze-1",
+        alert_type=VideoFreezeAlertType.CONTINUOUS,
+        recovery_pending=True,
+        healthy_segments_observed=0,
+        last_observed_sequence=102,
+        timeline_generation=2,
+        discontinuity_sequence=3,
+    )
+    assert VideoFreezeAlertRecoveryCodec.decode(
+        VideoFreezeAlertRecoveryCodec.encode(state)
+    ) == state
+
+    payload = json.loads(VideoFreezeAlertRecoveryCodec.encode(state))
+    payload["recovery_pending"] = "true"
+    with pytest.raises(ValueError, match="JSON boolean"):
+        VideoFreezeAlertRecoveryCodec.decode(json.dumps(payload))

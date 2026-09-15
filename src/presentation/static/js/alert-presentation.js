@@ -4,6 +4,7 @@ const TYPE_LABELS = Object.freeze({
     AUDIO_LOSS: 'Audio loss',
     VIDEO_FREEZE: 'Video freeze',
     REPEATED_VIDEO_FREEZE: 'Repeated video freeze',
+    MACROBLOCKING: 'Macroblocking',
     RUNTIME_HEALTH: 'Runtime health'
 });
 
@@ -15,6 +16,21 @@ export function presentAlert(alert) {
     const variantId = String(alert?.variant_id || '').trim();
     const variantStableId = String(alert?.variant_stable_id || '').trim();
     const interrupted = state === 'RESOLVED' && reason === 'observation_gap';
+    const attributes = alert?.attributes || {};
+    const startSegmentUri = String(attributes.start_segment_uri || '').trim();
+    const endSegmentUri = String(attributes.end_segment_uri || '').trim();
+    const startSequence = String(attributes.start_sequence || '').trim();
+    const endSequence = String(attributes.end_sequence || '').trim();
+    const affectedSegmentCount = String(
+        attributes.affected_segment_count || ''
+    ).trim();
+    const averageArea = Number(attributes.average_affected_area_ratio);
+    const peakArea = Number(attributes.peak_affected_area_ratio);
+    const areaSummary = eventType === 'MACROBLOCKING'
+        && Number.isFinite(averageArea)
+        && Number.isFinite(peakArea)
+        ? `Affected area: avg ${(averageArea * 100).toFixed(1)}%, peak ${(peakArea * 100).toFixed(1)}%`
+        : null;
 
     let visualClass = 'error';
     let lifecycleLabel = state;
@@ -37,6 +53,24 @@ export function presentAlert(alert) {
         ),
         visualClass,
         lifecycleLabel,
-        interrupted
+        interrupted,
+        areaSummary,
+        segmentRange: startSegmentUri ? {
+            startUri: startSegmentUri,
+            endUri: endSegmentUri || startSegmentUri,
+            startSequence,
+            endSequence: endSequence || startSequence,
+            affectedSegmentCount,
+            coverageComplete: attributes.coverage_complete !== 'false'
+        } : null
     };
+}
+
+export function safeSegmentUrl(value) {
+    try {
+        const parsed = new URL(value);
+        return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
+    } catch {
+        return null;
+    }
 }

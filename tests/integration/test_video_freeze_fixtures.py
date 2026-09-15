@@ -66,8 +66,8 @@ def test_generated_hls_has_exact_freeze_business_boundaries(tmp_path):
 
     expected = {
         "freeze_2_9s": [("start", 2.0), ("duration", 2.9), ("end", 4.9)],
-        "freeze_3_2s": [("start", 2.0), ("duration", 3.2), ("end", 5.2)],
-        "freeze_5_2s": [("start", 2.0), ("duration", 5.2), ("end", 7.2)],
+        "freeze_59s": [("start", 2.0), ("duration", 59.0), ("end", 61.0)],
+        "freeze_60s": [("start", 2.0), ("duration", 60.0), ("end", 62.0)],
         "freeze_cross_three_segments": [
             ("start", 1.2),
             ("duration", 5.6),
@@ -83,7 +83,7 @@ def test_generated_hls_has_exact_freeze_business_boundaries(tmp_path):
             abs=0.05,
         )
 
-    playlist = output / "freeze_5_2s" / "low" / "playlist.m3u8"
+    playlist = output / "freeze_cross_three_segments" / "low" / "playlist.m3u8"
     variant = Variant(
         id="low",
         stable_id="freeze-low",
@@ -95,7 +95,7 @@ def test_generated_hls_has_exact_freeze_business_boundaries(tmp_path):
     profile = VideoRealtimeProfile(timeout=10.0)
     observed = []
     try:
-        for index, segment in enumerate(segments[1:4], start=1):
+        for index, segment in enumerate(segments[:4]):
             segment.uri = str(playlist.parent / f"segment_{index:05d}.ts")
             analysis = profile.analyze(
                 segment,
@@ -115,7 +115,8 @@ def test_generated_hls_has_exact_freeze_business_boundaries(tmp_path):
         profile.close()
 
     assert observed == [
+        [(pytest.approx(1.2, abs=0.05), pytest.approx(segments[0].duration))],
         [(0.0, pytest.approx(segments[1].duration))],
         [(0.0, pytest.approx(segments[2].duration))],
-        [(0.0, pytest.approx(1.2, abs=0.05))],
+        [(0.0, pytest.approx(0.8, abs=0.05))],
     ]

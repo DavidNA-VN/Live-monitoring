@@ -11,6 +11,11 @@ class ShortBlackRecord:
     event_id: str
     event_at: float
     duration: float
+    start_sequence: int = -1
+    end_sequence: int = -1
+    start_segment_uri: str = ""
+    end_segment_uri: str = ""
+    affected_segment_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -23,6 +28,11 @@ class RepeatedBlackIncident:
     occurrences: int
     total_black_duration: float
     last_notified_occurrences: int
+    start_sequence: int = -1
+    end_sequence: int = -1
+    start_segment_uri: str = ""
+    end_segment_uri: str = ""
+    affected_segment_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -45,6 +55,11 @@ class RepeatedBlackAlert:
     occurrences: int
     total_black_duration: float
     reason: str
+    start_sequence: int = -1
+    end_sequence: int = -1
+    start_segment_uri: str = ""
+    end_segment_uri: str = ""
+    affected_segment_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -75,6 +90,7 @@ class RepeatedBlackReducer:
             for item in state.history
             if item.event_at > minimum_time
         }
+        is_new_record = record.event_id not in records_by_id
         records_by_id[record.event_id] = record
         history = tuple(
             sorted(
@@ -87,6 +103,13 @@ class RepeatedBlackReducer:
         )
 
         if state.incident is not None:
+            if not is_new_record:
+                return RepeatedBlackReduction(
+                    state=RepeatedBlackState(
+                        history=history,
+                        incident=state.incident,
+                    )
+                )
             incident = state.incident
             occurrences = incident.occurrences + 1
             total_duration = (
@@ -110,6 +133,14 @@ class RepeatedBlackReducer:
                     occurrences
                     if should_update
                     else incident.last_notified_occurrences
+                ),
+                start_sequence=incident.start_sequence,
+                end_sequence=record.end_sequence,
+                start_segment_uri=incident.start_segment_uri,
+                end_segment_uri=record.end_segment_uri,
+                affected_segment_count=(
+                    incident.affected_segment_count
+                    + record.affected_segment_count
                 ),
             )
             alert = (
@@ -146,6 +177,13 @@ class RepeatedBlackReducer:
                 item.duration for item in history
             ),
             last_notified_occurrences=len(history),
+            start_sequence=first.start_sequence,
+            end_sequence=record.end_sequence,
+            start_segment_uri=first.start_segment_uri,
+            end_segment_uri=record.end_segment_uri,
+            affected_segment_count=sum(
+                item.affected_segment_count for item in history
+            ),
         )
         return RepeatedBlackReduction(
             state=RepeatedBlackState(
@@ -159,26 +197,22 @@ class RepeatedBlackReducer:
             ),
         )
 
-    def resolve_if_quiet(
+    def resolve_incident(
         self,
         *,
         state: RepeatedBlackState,
-        reference_time: float,
+        reason: str = "healthy_recovery_confirmed",
     ) -> RepeatedBlackReduction:
         incident = state.incident
-        if (
-            incident is None
-            or reference_time - incident.last_event_at
-            < self.policy.repeated_recovery_window
-        ):
+        if incident is None:
             return RepeatedBlackReduction(state=state)
 
         return RepeatedBlackReduction(
-            state=RepeatedBlackState(),
+            state=RepeatedBlackState(history=(), incident=None),
             alert=self._alert(
                 RepeatedAlertState.RESOLVED,
                 incident,
-                reason="quiet_window_reached",
+                reason=reason,
             ),
             clear_state=True,
         )
@@ -199,4 +233,9 @@ class RepeatedBlackReducer:
                 incident.total_black_duration
             ),
             reason=reason,
+            start_sequence=incident.start_sequence,
+            end_sequence=incident.end_sequence,
+            start_segment_uri=incident.start_segment_uri,
+            end_segment_uri=incident.end_segment_uri,
+            affected_segment_count=incident.affected_segment_count,
         )

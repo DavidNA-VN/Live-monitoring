@@ -12,7 +12,7 @@ from models.analysis import (
 )
 from models.admission import LiveAdmissionPolicy
 from models.stream import StreamIdentity, build_stream_identity
-from models.variant_selection import VariantSelectionPolicy
+from models.variant_selection import VariantSelectionMode, VariantSelectionPolicy
 
 
 @dataclass(frozen=True)
@@ -40,10 +40,11 @@ class StreamConfig:
     alert_stream_max_length: int = 10_000
     black_screen_enabled: bool = True
     video_freeze_enabled: bool = False
+    macroblocking_enabled: bool = False
     freeze_noise_db: float = -60.0
     freeze_detector_minimum_duration: float = 0.2
     freeze_warning_duration: float = 3.0
-    freeze_alert_duration: float = 5.0
+    freeze_alert_duration: float = 60.0
     audio_loss_enabled: bool = True
     silence_threshold_dbfs: float = -60.0
     audio_loss_duration: float = 30.0
@@ -70,6 +71,7 @@ class StreamConfig:
             (
                 self.black_screen_enabled,
                 self.video_freeze_enabled,
+                self.macroblocking_enabled,
                 self.audio_loss_enabled,
             )
         ):
@@ -126,6 +128,13 @@ class StreamConfig:
             raise TypeError("admission_policy must be a LiveAdmissionPolicy")
         if not isinstance(self.variant_selection, VariantSelectionPolicy):
             raise TypeError("variant_selection must be a VariantSelectionPolicy")
+        if (
+            self.macroblocking_enabled
+            and self.variant_selection.mode is not VariantSelectionMode.HIGHEST_QUALITY
+        ):
+            raise ValueError(
+                "macroblocking requires highest_quality variant selection"
+            )
 
     @property
     def identity(self) -> StreamIdentity:

@@ -41,3 +41,6 @@ tools/
 *.xlsx
 
 ~$*
+# Local benchmark output
+benchmark_results/
+.benchmark/

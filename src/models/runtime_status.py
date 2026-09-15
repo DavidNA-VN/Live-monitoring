@@ -72,6 +72,9 @@ class RuntimeStatus:
     profile_analysis_total: Mapping[str, int] = field(default_factory=dict)
     active_media_processes: int = 0
     max_media_processes: int = 0
+    pending_work_count: int = 0
+    in_flight_work_count: int = 0
+    retained_work_count: int = 0
 
     def __post_init__(self) -> None:
         if self.active_variant_count < 0:
@@ -94,6 +97,9 @@ class RuntimeStatus:
             "dropped_media_segment_count": self.dropped_media_segment_count,
             "active_media_processes": self.active_media_processes,
             "max_media_processes": self.max_media_processes,
+            "pending_work_count": self.pending_work_count,
+            "in_flight_work_count": self.in_flight_work_count,
+            "retained_work_count": self.retained_work_count,
         }
         if any(value < 0 for value in counters.values()):
             raise ValueError("runtime telemetry counters must be >= 0")
@@ -176,6 +182,9 @@ class RuntimeStatus:
             "profile_analysis_total": dict(self.profile_analysis_total),
             "active_media_processes": self.active_media_processes,
             "max_media_processes": self.max_media_processes,
+            "pending_work_count": self.pending_work_count,
+            "in_flight_work_count": self.in_flight_work_count,
+            "retained_work_count": self.retained_work_count,
             "checks": {
                 name: (
                     status.value if isinstance(status, CheckStatus) else str(status)

@@ -37,13 +37,20 @@ def main() -> int:
             "pytest",
             "tests/e2e/test_mvp_api_worker_e2e.py",
             "tests/e2e/test_video_freeze_live_e2e.py",
+            "--basetemp=.pytest-tmp-mvp-e2e",
             "-v",
         ]
     elif mode == "all":
         print("=== Running Full Regression Suite ===")
         env["RUN_WORKER_MEDIA_E2E"] = "1"
         env["REQUIRE_MVP_E2E"] = "1"
-        cmd = [python_exe, "-m", "pytest", "-v"]
+        cmd = [
+            python_exe,
+            "-m",
+            "pytest",
+            "--basetemp=.pytest-tmp-mvp-e2e-all",
+            "-v",
+        ]
     else:
         print(f"Unknown mode '{mode}'. Usage: python scripts/run_mvp_e2e.py [fast|media|all]")
         return 1

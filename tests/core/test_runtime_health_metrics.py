@@ -66,6 +66,9 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         started_at=datetime.now(timezone.utc),
         successful_snapshots=1,
         queue_depth=7,
+        pending_work_count=7,
+        in_flight_work_count=3,
+        retained_work_count=10,
         queue_lag_seconds=2.5,
         live_edge_lag_seconds=4.25,
         startup_segments_selected=4,
@@ -81,12 +84,15 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
         dropped_media_segment_count=1,
         active_media_processes=2,
         max_media_processes=4,
+        peak_active_media_processes=3,
         profile_metrics={
             "video_analysis_total": 9,
             "video_analysis_failure_total": 2,
             "video_analysis_timeout_total": 1,
             "video_freeze_interval_total": 4,
             "video_freeze_seconds_total": 17.5,
+            "perf_video_realtime_profile_execution_seconds_p95": 0.75,
+            "perf_video_realtime_profile_execution_seconds_total": 2.5,
         },
         audio_analysis_total=7,
         audio_analysis_failure_total=2,
@@ -103,6 +109,9 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     )
     mapping = client.client.pipeline_instance.mapping
     assert mapping["queue_depth"] == 7
+    assert mapping["pending_work_count"] == 7
+    assert mapping["in_flight_work_count"] == 3
+    assert mapping["retained_work_count"] == 10
     assert mapping["queue_lag_seconds"] == "2.500000"
     assert mapping["live_edge_lag_seconds"] == "4.250000"
     assert mapping["startup_segments_selected"] == 4
@@ -117,6 +126,11 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert mapping["dropped_media_segments_total"] == 1
     assert mapping["active_media_processes"] == 2
     assert mapping["max_media_processes"] == 4
+    assert mapping["peak_active_media_processes"] == 3
+    assert (
+        mapping["perf_video_realtime_profile_execution_seconds_p95"]
+        == 0.75
+    )
     increments = client.client.pipeline_instance.increments
     assert increments["video_analysis_total"] == 9
     assert increments["startup_segments_selected_total"] == 4
@@ -130,6 +144,11 @@ def test_publish_exposes_queue_and_drop_metrics_separately_from_health():
     assert increments["video_analysis_timeout_total"] == 1
     assert increments["video_freeze_interval_total"] == 4
     assert increments["video_freeze_seconds_total"] == 17.5
+    assert (
+        increments["perf_video_realtime_profile_execution_seconds_total"]
+        == 2.5
+    )
+    assert "perf_video_realtime_profile_execution_seconds_p95" not in increments
     assert increments["audio_analysis_total"] == 7
     assert increments["audio_analysis_failure_total"] == 2
     assert increments["audio_analysis_timeout_total"] == 1

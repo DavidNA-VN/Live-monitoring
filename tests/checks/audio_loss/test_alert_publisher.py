@@ -43,6 +43,8 @@ def event():
         primary_cause=AudioLossCause.AUDIO_STREAM_MISSING,
         causes_seen=[AudioLossCause.AUDIO_STREAM_MISSING],
         affected_segment_count=15,
+        start_segment_uri="https://cdn.test/100.ts",
+        end_segment_uri="https://cdn.test/114.ts",
         timeline_generation=2,
         start_media_revision="revision-a",
         last_media_revision="revision-b",
@@ -93,6 +95,9 @@ def test_publisher_emits_canonical_variant_aware_contract():
     assert opened.attributes["threshold_dbfs"] == "-60"
     assert opened.attributes["threshold_duration"] == "30"
     assert opened.attributes["channel_mode"] == "all_channels"
+    assert opened.attributes["start_segment_uri"].endswith("/100.ts")
+    assert opened.attributes["end_segment_uri"].endswith("/114.ts")
+    assert opened.attributes["coverage_complete"] == "true"
     assert opened.attributes["audio_group"] == "main"
     assert opened.attributes["rendition_name"] == "English"
     assert opened.attributes["language"] == "en"

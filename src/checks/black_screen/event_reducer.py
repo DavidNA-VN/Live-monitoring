@@ -5,15 +5,18 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 
-from models.black_live import BlackLiveEvent
+from models.black_live import BlackEventStatus, BlackLiveEvent
 from models.detection import BlackDetectionResult, BlackInterval
 from models.segment import Segment
 
 
 class BlackEventTransitionType(str, Enum):
     PERSIST_OPEN = "persist_open"
+    CLOSE_EVENT = "close_event"
     RESOLVE = "resolve"
     MARK_COMMITTED = "mark_committed"
+    HEALTHY_EVIDENCE = "healthy_evidence"
+    UNKNOWN_GAP = "unknown_gap"
 
 
 @dataclass(frozen=True)
@@ -26,16 +29,19 @@ class BlackEventTransition:
     def __post_init__(self) -> None:
         needs_event = self.type in (
             BlackEventTransitionType.PERSIST_OPEN,
+            BlackEventTransitionType.CLOSE_EVENT,
             BlackEventTransitionType.RESOLVE,
         )
         if needs_event and self.event is None:
             raise ValueError(
                 f"{self.type.value} transition requires an event"
             )
-        if (
-            self.type == BlackEventTransitionType.RESOLVE
-            and not self.reason
-        ):
+        needs_reason = self.type in (
+            BlackEventTransitionType.CLOSE_EVENT,
+            BlackEventTransitionType.RESOLVE,
+            BlackEventTransitionType.UNKNOWN_GAP,
+        )
+        if needs_reason and not self.reason:
             raise ValueError(
                 "resolve transition requires a reason"
             )
@@ -70,6 +76,26 @@ class BlackEventReducer:
         if current is not None:
             current.stream_id = self.external_stream_id
 
+        if not result.checked:
+            if current is not None:
+                transitions.append(
+                    self._resolve(
+                        current,
+                        reason=result.error or "decode_failure",
+                        transition_type=BlackEventTransitionType.UNKNOWN_GAP,
+                        commits_segment=False,
+                    )
+                )
+            transitions.append(
+                BlackEventTransition(
+                    type=BlackEventTransitionType.UNKNOWN_GAP,
+                    reason=result.error or "decode_failure",
+                    commits_segment=True,
+                )
+            )
+            return transitions
+
+        has_observation_gap = False
         if (
             current is not None
             and not self._sequence_can_follow(
@@ -77,10 +103,13 @@ class BlackEventReducer:
                 segment=segment,
             )
         ):
+            has_observation_gap = True
             transitions.append(
                 self._resolve(
                     current,
                     reason="observation_gap",
+                    transition_type=BlackEventTransitionType.UNKNOWN_GAP,
+                    commits_segment=False,
                 )
             )
             current = None
@@ -91,25 +120,25 @@ class BlackEventReducer:
         )
 
         if not intervals:
-            if current is None:
-                transitions.append(
-                    BlackEventTransition(
-                        type=(
-                            BlackEventTransitionType
-                            .MARK_COMMITTED
-                        ),
-                        commits_segment=True,
-                    )
-                )
-            else:
+            if current is not None:
                 transitions.append(
                     self._resolve(
                         current,
                         reason="video_returned",
-                        commits_segment=True,
+                        commits_segment=False,
                     )
                 )
-
+            trans_type = (
+                BlackEventTransitionType.MARK_COMMITTED
+                if has_observation_gap
+                else BlackEventTransitionType.HEALTHY_EVIDENCE
+            )
+            transitions.append(
+                BlackEventTransition(
+                    type=trans_type,
+                    commits_segment=True,
+                )
+            )
             return transitions
 
         for index, interval in enumerate(intervals):
@@ -141,6 +170,15 @@ class BlackEventReducer:
                     segment=segment,
                     interval=interval,
                 )
+
+            next_continues = (
+                not is_last
+                and intervals[index + 1].start
+                <= interval.end + self.boundary_tolerance
+            )
+
+            if next_continues:
+                continue
 
             if self._ends_before_segment_end(
                 segment=segment,
@@ -187,11 +225,19 @@ class BlackEventReducer:
         event: BlackLiveEvent,
         *,
         reason: str,
+        transition_type: BlackEventTransitionType = (
+            BlackEventTransitionType.CLOSE_EVENT
+        ),
         commits_segment: bool = False,
     ) -> BlackEventTransition:
+        closed = self._copy_event(event)
+        if closed is not None:
+            closed.detection_closed = True
+            closed.status = BlackEventStatus.RESOLVED
+            closed.resolution_reason = reason
         return BlackEventTransition(
-            type=BlackEventTransitionType.RESOLVE,
-            event=self._copy_event(event),
+            type=transition_type,
+            event=closed,
             reason=reason,
             commits_segment=commits_segment,
         )
@@ -291,6 +337,11 @@ class BlackEventReducer:
             timeline_generation=segment.timeline_generation,
             start_media_revision=segment.media_revision,
             last_media_revision=segment.media_revision,
+            reference_segment_duration=segment.duration,
+            detection_closed=False,
+            start_segment_uri=segment.uri,
+            end_segment_uri=segment.uri,
+            coverage_complete=True,
         )
 
     @staticmethod
@@ -301,13 +352,12 @@ class BlackEventReducer:
         interval: BlackInterval,
     ) -> None:
         if segment.sequence == event.end_sequence:
+            added_duration = max(0.0, interval.end - event.end_offset)
+        else:
             added_duration = max(
                 0.0,
-                interval.end
-                - max(event.end_offset, interval.start),
-            )
-        else:
-            added_duration = interval.duration
+                event.last_segment_duration - event.end_offset,
+            ) + interval.end
 
         event.duration += added_duration
         event.end_sequence = segment.sequence
@@ -320,6 +370,7 @@ class BlackEventReducer:
         )
         event.last_segment_duration = segment.duration
         event.last_media_revision = segment.media_revision
+        event.end_segment_uri = segment.uri
 
         if segment.sequence not in event.affected_segments:
             event.affected_segments.append(segment.sequence)

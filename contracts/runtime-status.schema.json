@@ -61,6 +61,9 @@
       "default": {}
     },
     "active_media_processes": {"type": "integer", "minimum": 0, "default": 0},
-    "max_media_processes": {"type": "integer", "minimum": 0, "default": 0}
+    "max_media_processes": {"type": "integer", "minimum": 0, "default": 0},
+    "pending_work_count": {"type": "integer", "minimum": 0, "default": 0},
+    "in_flight_work_count": {"type": "integer", "minimum": 0, "default": 0},
+    "retained_work_count": {"type": "integer", "minimum": 0, "default": 0}
   }
 }

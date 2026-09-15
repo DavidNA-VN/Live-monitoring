@@ -140,3 +140,22 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-dark); color
 .badge-recovered { background: rgba(20, 184, 166, 0.3); color: #5eead4; border: 1px solid rgba(20, 184, 166, 0.5); }
 .badge-type { background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); }
 .badge-variant { background: #334155; color: #e2e8f0; }
+.segment-range {
+    display: block;
+    margin-top: 6px;
+    overflow-wrap: anywhere;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.segment-range a {
+    color: #7dd3fc;
+    text-decoration: underline;
+}
+
+.event-detail {
+    margin-top: 6px;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}

@@ -41,6 +41,9 @@ def valid_status_payload() -> dict:
         "profile_analysis_total": {"video_realtime": 12},
         "active_media_processes": 2,
         "max_media_processes": 4,
+        "pending_work_count": 5,
+        "in_flight_work_count": 2,
+        "retained_work_count": 7,
     }
 
 
@@ -69,6 +72,9 @@ def test_1_parse_full_valid_snapshot():
     assert dto.profile_analysis_total == {"video_realtime": 12}
     assert dto.active_media_processes == 2
     assert dto.max_media_processes == 4
+    assert dto.pending_work_count == 5
+    assert dto.in_flight_work_count == 2
+    assert dto.retained_work_count == 7
 
 
 def test_2_parse_optional_nullable_fields():
@@ -87,6 +93,22 @@ def test_2_parse_optional_nullable_fields():
     assert dto.live_edge_lag_seconds is None
     assert dto.error is None
     assert dto.health_reasons == []
+
+
+def test_queue_work_telemetry_rejects_invalid_values():
+    for field_name in (
+        "pending_work_count",
+        "in_flight_work_count",
+        "retained_work_count",
+    ):
+        payload = valid_status_payload()
+        payload[field_name] = -1
+
+        with pytest.raises(RuntimeStatusCodecError, match=field_name):
+            parse_public_runtime_status(
+                payload,
+                requested_stream_id="chan-01",
+            )
 
 
 def test_3_accept_bytes_and_string_values():

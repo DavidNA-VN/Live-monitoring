@@ -66,6 +66,9 @@ def stream_config_to_public(config: StreamConfig) -> dict[str, Any]:
                     config.freeze_alert_duration
                 ),
             },
+            "macroblocking": {
+                "enabled": config.macroblocking_enabled,
+            },
             "audio_loss": {
                 "enabled": config.audio_loss_enabled,
                 "threshold_dbfs": float(config.silence_threshold_dbfs),
@@ -112,7 +115,7 @@ def stream_config_from_public(data: object) -> StreamConfig:
     variant_selection = data.get(
         "variant_selection",
         {
-            "mode": "all",
+            "mode": "highest_quality",
             "representative_count": 3,
             "explicit_variant_ids": [],
         },
@@ -143,7 +146,7 @@ def stream_config_from_public(data: object) -> StreamConfig:
         raise StreamConfigMappingError("invalid config.variant_selection fields")
     try:
         selection_mode = VariantSelectionMode(
-            variant_selection.get("mode", "all")
+            variant_selection.get("mode", "highest_quality")
         )
     except (TypeError, ValueError) as exc:
         raise StreamConfigMappingError(
@@ -233,6 +236,7 @@ def stream_config_from_public(data: object) -> StreamConfig:
         "black_screen",
         "audio_loss",
         "video_freeze",
+        "macroblocking",
     }
     missing_checks = required_checks - set(checks)
     if unknown_checks or missing_checks:
@@ -255,7 +259,7 @@ def stream_config_from_public(data: object) -> StreamConfig:
             "noise_db": -60.0,
             "detector_minimum_duration": 0.2,
             "warning_duration_seconds": 3.0,
-            "alert_duration_seconds": 5.0,
+            "alert_duration_seconds": 60.0,
         }
     elif isinstance(freeze, dict):
         freeze = _check_object(
@@ -271,9 +275,21 @@ def stream_config_from_public(data: object) -> StreamConfig:
         )
     else:
         raise StreamConfigMappingError("video_freeze must be an object")
+    macroblocking = checks.get("macroblocking", {"enabled": False})
+    if isinstance(macroblocking, dict):
+        macroblocking = _check_object(
+            {"macroblocking": macroblocking},
+            "macroblocking",
+            {"enabled"},
+        )
+    else:
+        raise StreamConfigMappingError("macroblocking must be an object")
     black_enabled = _boolean(black, "enabled", "black_screen")
     audio_enabled = _boolean(audio, "enabled", "audio_loss")
     freeze_enabled = _boolean(freeze, "enabled", "video_freeze")
+    macroblocking_enabled = _boolean(
+        macroblocking, "enabled", "macroblocking"
+    )
     threshold = _finite_number(
         audio, "threshold_dbfs", check="audio_loss", maximum=0
     )
@@ -317,6 +333,7 @@ def stream_config_from_public(data: object) -> StreamConfig:
             stream_id=stream_id.strip(),
             black_screen_enabled=black_enabled,
             video_freeze_enabled=freeze_enabled,
+            macroblocking_enabled=macroblocking_enabled,
             freeze_noise_db=freeze_noise,
             freeze_detector_minimum_duration=freeze_minimum,
             freeze_warning_duration=freeze_warning,

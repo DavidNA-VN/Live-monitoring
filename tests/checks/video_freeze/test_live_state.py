@@ -10,6 +10,8 @@ from core.alert_stream import AlertSink
 from core.redis_client import RedisUnavailableError
 from core.redis_keys import AlertRedisKeys, RedisNamespace, RuntimeRedisKeys
 from models.freeze import FreezeInterval, VideoFreezeDetectionResult
+from dataclasses import replace
+from core.frame_similarity import make_gray_fingerprint
 from tests.factories.hls import make_segment
 
 
@@ -142,6 +144,19 @@ def context():
 
 
 def detection(segment, *intervals):
+    fingerprint = make_gray_fingerprint(bytes([100] * (32 * 32)))
+    intervals = tuple(
+        replace(
+            item,
+            start_boundary_fingerprint=(
+                fingerprint if item.start <= 0.1 else None
+            ),
+            end_boundary_fingerprint=(
+                fingerprint if item.end >= segment.duration - 0.1 else None
+            ),
+        )
+        for item in intervals
+    )
     return VideoFreezeDetectionResult(
         variant_id=segment.variant_id,
         sequence=segment.sequence,
@@ -151,27 +166,26 @@ def detection(segment, *intervals):
     )
 
 
-def test_warning_upgrade_and_resolution_share_one_event(context):
+def test_continuous_open_and_resolution_share_one_event(context):
     store, client, _keys = context
-    first = make_segment(100, duration=3.0)
-    second = make_segment(101, duration=2.0)
+    first = make_segment(100, duration=30.0)
+    second = make_segment(101, duration=30.0)
     moving = make_segment(102, duration=2.0)
     for item in (first, second, moving):
         item.media_revision = f"r-{item.sequence}"
 
     store.apply(
         segment=first,
-        result=detection(first, FreezeInterval(0.0, 3.0)),
+        result=detection(first, FreezeInterval(0.0, 30.0)),
     )
     store.apply(
         segment=second,
-        result=detection(second, FreezeInterval(0.0, 2.0)),
+        result=detection(second, FreezeInterval(0.0, 30.0)),
     )
     store.apply(segment=moving, result=detection(moving))
 
     assert [item.state for item in client.alerts] == [
         "OPEN",
-        "UPDATE",
         "RESOLVED",
     ]
     assert len({item.event_id for item in client.alerts}) == 1
@@ -190,7 +204,7 @@ def test_freeze_below_warning_threshold_stays_internal(context):
     assert client.alerts == []
 
 
-def test_warning_reached_on_resolution_emits_atomic_open_resolved_pair(
+def test_short_freeze_closure_does_not_emit_continuous_alert(
     context,
 ):
     store, client, _keys = context
@@ -202,12 +216,7 @@ def test_warning_reached_on_resolution_emits_atomic_open_resolved_pair(
         result=detection(segment, FreezeInterval(0.0, 3.2)),
     )
 
-    assert [item.state for item in client.alerts] == ["OPEN", "RESOLVED"]
-    assert [item.attributes["severity"] for item in client.alerts] == [
-        "WARNING",
-        "WARNING",
-    ]
-    assert len({item.event_id for item in client.alerts}) == 1
+    assert client.alerts == []
 
 
 def test_failed_transaction_leaves_no_event_alert_or_commit(context):
@@ -252,6 +261,11 @@ def test_three_warning_events_open_one_bounded_repeated_incident(context):
         if item.event_type == "REPEATED_VIDEO_FREEZE"
     ]
     history = keys.short_history("internal", "v720", 0)
-    assert len(repeated) == 1
+    assert [item.state for item in repeated] == ["OPEN", "RESOLVED"]
+    assert len({item.event_id for item in repeated}) == 1
     assert repeated[0].attributes["occurrences"] == "3"
-    assert len(client.sorted_sets[history]) == 3
+    assert repeated[0].attributes["start_segment_uri"]
+    assert repeated[0].attributes["end_segment_uri"]
+    assert repeated[0].attributes["affected_segment_count"] == "3"
+    assert repeated[0].attributes["coverage_complete"] == "false"
+    assert history not in client.sorted_sets

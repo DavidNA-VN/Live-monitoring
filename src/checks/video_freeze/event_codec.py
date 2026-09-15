@@ -1,11 +1,15 @@
+import base64
 import json
 from datetime import datetime
 
 from models.freeze import (
+    VideoFreezeAlertRecoveryState,
+    VideoFreezeAlertType,
     VideoFreezeEventStatus,
     VideoFreezeLiveEvent,
     VideoFreezeSeverity,
 )
+from models.frame_fingerprint import BoundaryFrameFingerprint
 
 
 class VideoFreezeEventCodec:
@@ -43,6 +47,16 @@ class VideoFreezeEventCodec:
                 "warning_sent": event.warning_sent,
                 "alert_sent": event.alert_sent,
                 "resolution_reason": event.resolution_reason,
+                "reference_segment_duration": event.reference_segment_duration,
+                "detection_closed": event.detection_closed,
+                "last_boundary_fingerprint": (
+                    VideoFreezeEventCodec._encode_fingerprint(
+                        event.last_boundary_fingerprint
+                    )
+                ),
+                "start_segment_uri": event.start_segment_uri,
+                "end_segment_uri": event.end_segment_uri,
+                "coverage_complete": event.coverage_complete,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -85,7 +99,59 @@ class VideoFreezeEventCodec:
             warning_sent=bool(data.get("warning_sent", False)),
             alert_sent=bool(data.get("alert_sent", False)),
             resolution_reason=data.get("resolution_reason"),
+            reference_segment_duration=float(
+                data.get(
+                    "reference_segment_duration",
+                    data["last_segment_duration"],
+                )
+            ),
+            detection_closed=(data.get("detection_closed") is True),
+            last_boundary_fingerprint=(
+                VideoFreezeEventCodec._decode_fingerprint(
+                    data.get("last_boundary_fingerprint")
+                )
+            ),
+            start_segment_uri=str(data.get("start_segment_uri", "")),
+            end_segment_uri=str(data.get("end_segment_uri", "")),
+            coverage_complete=data.get("coverage_complete", True) is True,
         )
+
+    @staticmethod
+    def _encode_fingerprint(
+        value: BoundaryFrameFingerprint | None,
+    ) -> dict[str, object] | None:
+        if value is None:
+            return None
+        return {
+            "algorithm": value.algorithm,
+            "width": value.width,
+            "height": value.height,
+            "pixels_base64": base64.b64encode(value.pixels).decode("ascii"),
+            "is_black": value.is_black,
+        }
+
+    @staticmethod
+    def _decode_fingerprint(value: object) -> BoundaryFrameFingerprint | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("boundary fingerprint must be an object")
+        try:
+            pixels = base64.b64decode(
+                str(value["pixels_base64"]), validate=True
+            )
+            is_black = value["is_black"]
+            if not isinstance(is_black, bool):
+                raise TypeError("fingerprint is_black must be a boolean")
+            return BoundaryFrameFingerprint(
+                algorithm=str(value["algorithm"]),
+                width=int(value["width"]),
+                height=int(value["height"]),
+                pixels=pixels,
+                is_black=is_black,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid boundary fingerprint") from exc
 
     @staticmethod
     def _encode_time(value: datetime | None) -> str | None:
@@ -94,3 +160,45 @@ class VideoFreezeEventCodec:
     @staticmethod
     def _decode_time(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value) if value else None
+
+
+class VideoFreezeAlertRecoveryCodec:
+    @staticmethod
+    def encode(state: VideoFreezeAlertRecoveryState) -> str:
+        return json.dumps(
+            {
+                "alert_event_id": state.alert_event_id,
+                "alert_type": state.alert_type.value,
+                "recovery_pending": state.recovery_pending,
+                "healthy_segments_observed": state.healthy_segments_observed,
+                "last_observed_sequence": state.last_observed_sequence,
+                "timeline_generation": state.timeline_generation,
+                "discontinuity_sequence": state.discontinuity_sequence,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def decode(raw: str) -> VideoFreezeAlertRecoveryState:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("video-freeze recovery payload must be an object")
+        pending = data.get("recovery_pending", False)
+        if not isinstance(pending, bool):
+            raise ValueError("recovery_pending must be a JSON boolean")
+        integers = {
+            "healthy_segments_observed": data.get("healthy_segments_observed", 0),
+            "last_observed_sequence": data.get("last_observed_sequence", -1),
+            "timeline_generation": data.get("timeline_generation", 0),
+            "discontinuity_sequence": data.get("discontinuity_sequence", 0),
+        }
+        for name, value in integers.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be a JSON integer")
+        return VideoFreezeAlertRecoveryState(
+            alert_event_id=str(data["alert_event_id"]),
+            alert_type=VideoFreezeAlertType(data["alert_type"]),
+            recovery_pending=pending,
+            **integers,
+        )

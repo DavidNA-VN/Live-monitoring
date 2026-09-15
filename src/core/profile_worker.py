@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 import logging
 from threading import Event, Thread
@@ -38,6 +41,21 @@ class ProfileSegmentWork:
     processors: tuple[ProcessorSegmentWork, ...]
 
 
+@dataclass(frozen=True)
+class _AnalysisResult:
+    analysis: SegmentAnalysisBundle | None
+    duration_seconds: float
+    failed_processor_names: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class _PendingAnalysis:
+    item: ProfileSegmentWork
+    claimed: tuple[tuple[SegmentProcessor, SegmentClaim], ...]
+    heartbeats: tuple[tuple[Event, Thread], ...]
+    future: Future[_AnalysisResult]
+
+
 class ProfileWorkerCoordinator:
     """Owns claim, lease, analysis and commit for admitted profile work."""
 
@@ -46,10 +64,14 @@ class ProfileWorkerCoordinator:
         state_store: RedisSegmentStateStore,
         metrics: RuntimeMetricCollector | None = None,
         media_process_gate: ProcessGate | None = None,
+        max_parallel_analysis: int = 2,
     ) -> None:
+        if max_parallel_analysis <= 0:
+            raise ValueError("max_parallel_analysis must be > 0")
         self.state_store = state_store
         self.metrics = metrics or RuntimeMetricCollector()
         self.media_process_gate = media_process_gate
+        self.max_parallel_analysis = max_parallel_analysis
         self.stop_event = Event()
 
     def request_stop(self) -> None:
@@ -59,40 +81,219 @@ class ProfileWorkerCoordinator:
         self,
         profile: AnalysisProfile,
         work: list[ProfileSegmentWork],
+        *,
+        max_parallel_analysis: int | None = None,
+        on_item_completed: Callable[[ProfileSegmentIdentity], None]
+        | None = None,
     ) -> None:
+        parallel_limit = (
+            self.max_parallel_analysis
+            if max_parallel_analysis is None
+            else max_parallel_analysis
+        )
+        if parallel_limit <= 0:
+            raise ValueError("max_parallel_analysis must be > 0")
         blocked_processors: set[str] = set()
-        for item in work:
-            if self.stop_event.is_set():
-                return
-            try:
-                claimed = self._claim_processors(item, blocked_processors)
-            except RedisUnavailableError:
-                return
-            if not claimed:
-                continue
-            heartbeats = self._start_heartbeats(claimed)
-            try:
-                analysis_started = monotonic()
-                analysis = self._analyze(
-                    profile, item.segment, claimed, blocked_processors
-                )
-                self.metrics.record_analysis(
-                    duration_seconds=monotonic() - analysis_started,
-                    segment_age_seconds=self._segment_age(item.segment),
-                    ffmpeg_timed_out=bool(
-                        analysis and analysis.media_process_timed_out
-                    ),
-                )
-                if analysis is None:
+        pending: deque[_PendingAnalysis] = deque()
+        work_iterator = iter(work)
+        exhausted = False
+        worker_count = min(parallel_limit, max(1, len(work)))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="media-monitor-analysis",
+        ) as analysis_executor:
+            while pending or not exhausted:
+                while (
+                    not exhausted
+                    and not self.stop_event.is_set()
+                    and len(pending) < parallel_limit
+                ):
+                    try:
+                        item = next(work_iterator)
+                    except StopIteration:
+                        exhausted = True
+                        break
+                    prepared = self._submit_analysis(
+                        analysis_executor,
+                        profile,
+                        item,
+                        blocked_processors,
+                    )
+                    if prepared is not None:
+                        pending.append(prepared)
+
+                if not pending:
+                    break
+
+                current = pending.popleft()
+                if self.stop_event.is_set():
+                    self._defer_pending_analysis(
+                        current,
+                        reason="worker shutdown before ordered commit",
+                    )
                     continue
-                self.metrics.record_profile_result(analysis)
-                for processor, claim in claimed:
-                    if not self._process_claimed_segment(
-                        processor, item.segment, claim, analysis
-                    ):
-                        blocked_processors.add(processor.name)
-            finally:
-                self._stop_heartbeats(heartbeats)
+                self._commit_analysis_result(
+                    profile,
+                    current,
+                    blocked_processors,
+                    on_item_completed,
+                )
+
+            while pending:
+                self._defer_pending_analysis(
+                    pending.popleft(),
+                    reason="worker shutdown before ordered commit",
+                )
+
+    def _submit_analysis(
+        self,
+        executor: ThreadPoolExecutor,
+        profile: AnalysisProfile,
+        item: ProfileSegmentWork,
+        blocked_processors: set[str],
+    ) -> _PendingAnalysis | None:
+        try:
+            claimed = self._claim_processors(item, blocked_processors)
+        except RedisUnavailableError:
+            self.request_stop()
+            return None
+        if not claimed:
+            return None
+        heartbeats = self._start_heartbeats(claimed)
+        try:
+            future = executor.submit(
+                self._run_analysis,
+                profile,
+                item,
+                tuple(claimed),
+            )
+        except Exception:
+            self._stop_heartbeats(heartbeats)
+            self._relinquish_claims(
+                claimed, "unable to submit profile analysis"
+            )
+            raise
+        return _PendingAnalysis(
+            item=item,
+            claimed=tuple(claimed),
+            heartbeats=tuple(heartbeats),
+            future=future,
+        )
+
+    def _run_analysis(
+        self,
+        profile: AnalysisProfile,
+        item: ProfileSegmentWork,
+        claimed: tuple[tuple[SegmentProcessor, SegmentClaim], ...],
+    ) -> _AnalysisResult:
+        started = monotonic()
+        failed_processors: set[str] = set()
+        analysis = self._analyze(
+            profile,
+            item.segment,
+            list(claimed),
+            failed_processors,
+        )
+        return _AnalysisResult(
+            analysis=analysis,
+            duration_seconds=monotonic() - started,
+            failed_processor_names=frozenset(failed_processors),
+        )
+
+    def _commit_analysis_result(
+        self,
+        profile: AnalysisProfile,
+        pending: _PendingAnalysis,
+        blocked_processors: set[str],
+        on_item_completed: Callable[[ProfileSegmentIdentity], None] | None,
+    ) -> None:
+        try:
+            result = pending.future.result()
+            analysis = result.analysis
+            self.metrics.record_analysis(
+                duration_seconds=result.duration_seconds,
+                segment_age_seconds=self._segment_age(pending.item.segment),
+                ffmpeg_timed_out=bool(
+                    analysis and analysis.media_process_timed_out
+                ),
+            )
+            if analysis is None:
+                blocked_processors.update(result.failed_processor_names)
+                self._record_work_state(profile, completed=False)
+                return
+            self.metrics.record_profile_result(analysis)
+            if analysis.media_process_timed_out:
+                for dimension in self._metric_dimensions(profile):
+                    self.metrics.record_work_timed_out(dimension)
+            work_succeeded = True
+            for processor, claim in pending.claimed:
+                if processor.name in blocked_processors:
+                    self._relinquish_claims(
+                        ((processor, claim),),
+                        "ordered commit blocked by an earlier segment",
+                    )
+                    work_succeeded = False
+                    continue
+                if not self._process_claimed_segment(
+                    processor,
+                    pending.item.segment,
+                    claim,
+                    analysis,
+                ):
+                    blocked_processors.add(processor.name)
+                    work_succeeded = False
+            item_completed = (
+                work_succeeded
+                and len(pending.claimed) == len(pending.item.processors)
+            )
+            self._record_work_state(profile, completed=item_completed)
+            if item_completed and on_item_completed is not None:
+                self._notify_item_completed(
+                    on_item_completed,
+                    pending.item.admission_identity,
+                )
+        finally:
+            self._stop_heartbeats(list(pending.heartbeats))
+
+    def _defer_pending_analysis(
+        self,
+        pending: _PendingAnalysis,
+        *,
+        reason: str,
+    ) -> None:
+        try:
+            pending.future.result()
+            self._relinquish_claims(pending.claimed, reason)
+        finally:
+            self._stop_heartbeats(list(pending.heartbeats))
+
+    def _relinquish_claims(
+        self,
+        claimed: tuple[tuple[SegmentProcessor, SegmentClaim], ...]
+        | list[tuple[SegmentProcessor, SegmentClaim]],
+        reason: str,
+    ) -> None:
+        for _processor, claim in claimed:
+            try:
+                self.state_store.relinquish(claim, reason)
+            except (RedisUnavailableError, SegmentLeaseLostError):
+                pass
+
+    @staticmethod
+    def _notify_item_completed(
+        callback: Callable[[ProfileSegmentIdentity], None],
+        identity: ProfileSegmentIdentity,
+    ) -> None:
+        try:
+            callback(identity)
+        except Exception:
+            logger.exception(
+                "Unable to acknowledge completed admission item "
+                "profile=%s variant=%s seq=%s",
+                identity.profile_name,
+                identity.variant_stable_id,
+                identity.sequence,
+            )
 
     def _claim_processors(
         self,
@@ -144,16 +345,15 @@ class ProfileWorkerCoordinator:
                 AnalysisResourceClass.EXPENSIVE,
             )
             if not uses_media_process or self.media_process_gate is None:
-                return profile.analyze(
-                    segment,
-                    requirements=requirements,
-                )
+                return self._execute_profile(profile, segment, requirements)
+            gate_started = monotonic()
             self.media_process_gate.acquire()
             try:
-                return profile.analyze(
-                    segment,
-                    requirements=requirements,
-                )
+                for dimension in self._metric_dimensions(profile):
+                    self.metrics.record_process_gate_wait(
+                        dimension, monotonic() - gate_started
+                    )
+                return self._execute_profile(profile, segment, requirements)
             finally:
                 self.media_process_gate.release()
         except Exception as exc:
@@ -178,6 +378,44 @@ class ProfileWorkerCoordinator:
                 blocked.add(processor.name)
             return None
 
+    def _execute_profile(
+        self,
+        profile: AnalysisProfile,
+        segment: Segment,
+        requirements: frozenset[AnalysisRequirement],
+    ) -> SegmentAnalysisBundle:
+        started = monotonic()
+        try:
+            return profile.analyze(segment, requirements=requirements)
+        finally:
+            for dimension in self._metric_dimensions(profile):
+                self.metrics.record_profile_execution(
+                    dimension, monotonic() - started
+                )
+
+    def _record_work_state(
+        self, profile: AnalysisProfile, *, completed: bool
+    ) -> None:
+        recorder = (
+            self.metrics.record_work_completed
+            if completed
+            else self.metrics.record_work_failed
+        )
+        for dimension in self._metric_dimensions(profile):
+            recorder(dimension)
+
+    @staticmethod
+    def _metric_dimensions(profile: AnalysisProfile) -> tuple[str, str]:
+        resource_class = getattr(
+            profile,
+            "resource_class",
+            AnalysisResourceClass.VIDEO_DECODE,
+        )
+        return (
+            profile.name,
+            f"resource_{AnalysisResourceClass(resource_class).value}",
+        )
+
     def _process_claimed_segment(
         self,
         processor: SegmentProcessor,
@@ -186,7 +424,13 @@ class ProfileWorkerCoordinator:
         analysis: SegmentAnalysisBundle,
     ) -> bool:
         try:
-            outcome = processor.process(segment, analysis)
+            processing_started = monotonic()
+            try:
+                outcome = processor.process(segment, analysis)
+            finally:
+                self.metrics.record_result_processing(
+                    analysis.profile_name, monotonic() - processing_started
+                )
             if not outcome.success:
                 if outcome.retryable:
                     self.state_store.mark_retryable_failure(
@@ -199,7 +443,13 @@ class ProfileWorkerCoordinator:
                 )
                 return True
             try:
-                processor.commit(segment, outcome)
+                commit_started = monotonic()
+                try:
+                    processor.commit(segment, outcome)
+                finally:
+                    self.metrics.record_result_commit(
+                        analysis.profile_name, monotonic() - commit_started
+                    )
             except Exception as exc:
                 self.state_store.mark_retryable_failure(claim, str(exc))
                 self.metrics.record_retry()

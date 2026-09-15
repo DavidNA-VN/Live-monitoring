@@ -43,6 +43,9 @@ ALLOWED_KEYS: Set[str] = {
     "profile_analysis_total",
     "active_media_processes",
     "max_media_processes",
+    "pending_work_count",
+    "in_flight_work_count",
+    "retained_work_count",
 }
 
 REQUIRED_KEYS: Set[str] = {
@@ -190,6 +193,9 @@ def parse_public_runtime_status(
             "dropped_media_segment_count",
             "active_media_processes",
             "max_media_processes",
+            "pending_work_count",
+            "in_flight_work_count",
+            "retained_work_count",
         )
     }
     if (

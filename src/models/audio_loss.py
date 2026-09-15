@@ -67,3 +67,6 @@ class AudioLossLiveEvent:
     rendition_default: bool = False
     rendition_autoselect: bool = False
     hls_stable_rendition_id: str | None = None
+    start_segment_uri: str = ""
+    end_segment_uri: str = ""
+    coverage_complete: bool = True

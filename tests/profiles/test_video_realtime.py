@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +8,11 @@ from core.process_runner import (
     ProcessTimeoutError,
 )
 from models.analysis import AnalysisRequirement
+from models.macroblocking import (
+    MacroblockingAnalyzerConfig,
+    MacroblockingFusionStrategy,
+)
+from detectors.macroblocking import MacroblockingAnalyzer
 from media.input_resolver import ResolvedMediaInput
 from models.segment import SegmentEncryption
 from profiles.video_realtime import VideoRealtimeProfile
@@ -39,6 +45,8 @@ class FakeProcessRunner:
         )
         if self.error is not None:
             raise self.error
+        if "rawvideo" in command:
+            Path(command[-1]).write_bytes(bytes([100] * (2 * 32 * 32)))
         return self.result
 
 
@@ -121,10 +129,12 @@ def test_profile_builds_black_and_freeze_filters_in_one_process(segment):
 
     assert len(runner.calls) == 1
     command = runner.calls[0]["command"]
-    filter_graph = command[command.index("-vf") + 1]
+    filter_graph = command[command.index("-filter_complex") + 1]
     assert filter_graph == (
-        "blackdetect=d=0:pix_th=0.1:pic_th=0.98,"
-        "freezedetect=n=-60dB:d=0.2"
+        "[0:v:0]split=2[analysis][sample_source];"
+        "[analysis]blackdetect=d=0:pix_th=0.1:pic_th=0.98,"
+        "freezedetect=n=-60dB:d=0.2[analyzed];"
+        "[sample_source]scale=32:32,format=gray[samples]"
     )
     assert [(item.start, item.end) for item in black_intervals(result)] == [
         (1.0, 2.0)
@@ -132,6 +142,12 @@ def test_profile_builds_black_and_freeze_filters_in_one_process(segment):
     assert [(item.start, item.end) for item in freeze_intervals(result)] == [
         (2.5, 4.5)
     ]
+    assert result.diagnostics == {
+        "video_freeze_raw_interval_total": 1,
+        "video_freeze_raw_seconds_total": 2.0,
+        "video_freeze_black_overlap_seconds_total": 0.0,
+        "video_freeze_boundary_fingerprint_total": 0,
+    }
 
 
 def test_profile_can_request_only_freeze_observation(segment):
@@ -145,8 +161,9 @@ def test_profile_can_request_only_freeze_observation(segment):
     )
 
     command = runner.calls[0]["command"]
-    filter_graph = command[command.index("-vf") + 1]
-    assert filter_graph == "freezedetect=n=-60dB:d=0.2"
+    filter_graph = command[command.index("-filter_complex") + 1]
+    assert "blackdetect=d=0:pix_th=0.1:pic_th=0.98" in filter_graph
+    assert "freezedetect=n=-60dB:d=0.2" in filter_graph
     assert freeze_intervals(result) == ()
     with pytest.raises(ValueError, match="black_intervals"):
         black_intervals(result)
@@ -163,6 +180,198 @@ def test_command_builder_assembles_filters_into_one_decode_command():
     assert command[command.index("-vf") + 1] == (
         "blackdetect=d=0,freezedetect=d=2"
     )
+
+
+def test_freeze_sampling_command_uses_one_input_decode(tmp_path):
+    raw_path = tmp_path / "frames.raw"
+    command = VideoRealtimeCommandBuilder().build(
+        media_input=ResolvedMediaInput("https://media/segment.ts"),
+        filter_expressions=("blackdetect=d=0", "freezedetect=d=0.2"),
+        boundary_raw_output=raw_path,
+    )
+
+    assert command.count("ffmpeg") == 1
+    assert command.count("-i") == 1
+    assert command.count("-filter_complex") == 1
+    assert str(raw_path) == command[-1]
+
+
+def test_macroblocking_sampling_adds_branch_to_same_decode(tmp_path):
+    boundary_path = tmp_path / "boundary.raw"
+    macroblocking_path = tmp_path / "macroblocking.raw"
+    command = VideoRealtimeCommandBuilder().build(
+        media_input=ResolvedMediaInput("https://media/segment.ts"),
+        filter_expressions=("blackdetect=d=0", "freezedetect=d=0.2"),
+        boundary_raw_output=boundary_path,
+        macroblocking_raw_output=macroblocking_path,
+        macroblocking_width=64,
+        macroblocking_height=36,
+        macroblocking_sampling_fps=1.0,
+    )
+
+    assert command.count("ffmpeg") == 1
+    assert command.count("-i") == 1
+    graph = command[command.index("-filter_complex") + 1]
+    assert "split=3" in graph
+    assert "blackdetect=d=0,freezedetect=d=0.2" in graph
+    assert "scale=32:32,format=gray[samples]" in graph
+    assert "fps=1,scale=64:36:flags=area,format=gray" in graph
+    assert command[command.index("-frames:v") + 1] == "64"
+    assert str(boundary_path) in command
+    assert str(macroblocking_path) in command
+
+
+def test_disabled_macroblocking_keeps_legacy_command_shape(segment):
+    runner = FakeProcessRunner()
+    profile = VideoRealtimeProfile(runner=runner)
+    video_result(
+        profile,
+        segment,
+        frozenset({AnalysisRequirement.BLACK_INTERVALS}),
+    )
+    command = runner.calls[0]["command"]
+    assert "-vf" in command
+    assert "macroblocking_samples" not in command
+
+
+def test_macroblocking_only_request_still_uses_one_ffmpeg_process(segment):
+    class MacroSampleRunner(FakeProcessRunner):
+        def run(self, command, *, timeout):
+            self.calls.append({"command": command, "timeout": timeout})
+            Path(command[-1]).write_bytes(bytes(range(32)) * 24)
+            return self.result
+
+    runner = MacroSampleRunner()
+    analyzer = MacroblockingAnalyzer(
+        MacroblockingAnalyzerConfig(
+            fusion_strategy=MacroblockingFusionStrategy.MAX_WITH_CONSISTENCY,
+            analysis_width=32,
+            analysis_height=24,
+            sampling_fps=1.0,
+            relative_scale_divisors=(8, 4, 2),
+        )
+    )
+    profile = VideoRealtimeProfile(
+        runner=runner,
+        enable_macroblocking=True,
+        macroblocking_analyzer=analyzer,
+    )
+
+    result = video_result(
+        profile,
+        segment,
+        frozenset({AnalysisRequirement.MACROBLOCKING_OBSERVATIONS}),
+    )
+
+    observations = result.require_output(
+        AnalysisRequirement.MACROBLOCKING_OBSERVATIONS,
+        tuple,
+    )
+    assert result.checked is True
+    assert len(observations) == 1
+    assert len(runner.calls) == 1
+    command = runner.calls[0]["command"]
+    assert command.count("-i") == 1
+    assert "null[analyzed]" in command[command.index("-filter_complex") + 1]
+
+
+def test_macroblocking_does_not_change_black_or_freeze_outputs(segment):
+    class CombinedSampleRunner(FakeProcessRunner):
+        def run(self, command, *, timeout):
+            self.calls.append({"command": command, "timeout": timeout})
+            outputs = [
+                Path(command[index + 1])
+                for index, value in enumerate(command)
+                if value == "rawvideo"
+            ]
+            outputs[0].write_bytes(bytes([90]) * (2 * 32 * 32))
+            outputs[1].write_bytes(bytes(range(32)) * 24)
+            return self.result
+
+    runner = CombinedSampleRunner(
+        result=FakeProcessResult(
+            stderr="\n".join(
+                (
+                    "black_start:1 black_end:2",
+                    "lavfi.freezedetect.freeze_start: 2.5",
+                    "lavfi.freezedetect.freeze_duration: 2",
+                    "lavfi.freezedetect.freeze_end: 4.5",
+                )
+            )
+        )
+    )
+    analyzer = MacroblockingAnalyzer(
+        MacroblockingAnalyzerConfig(
+            fusion_strategy=MacroblockingFusionStrategy.MAX_WITH_CONSISTENCY,
+            analysis_width=32,
+            analysis_height=24,
+            sampling_fps=1.0,
+            relative_scale_divisors=(8, 4, 2),
+        )
+    )
+    profile = VideoRealtimeProfile(
+        runner=runner,
+        enable_macroblocking=True,
+        macroblocking_analyzer=analyzer,
+    )
+
+    result = video_result(
+        profile,
+        segment,
+        frozenset(
+            {
+                AnalysisRequirement.BLACK_INTERVALS,
+                AnalysisRequirement.FREEZE_INTERVALS,
+                AnalysisRequirement.MACROBLOCKING_OBSERVATIONS,
+            }
+        ),
+    )
+
+    assert [(item.start, item.end) for item in black_intervals(result)] == [
+        (1.0, 2.0)
+    ]
+    assert [(item.start, item.end) for item in freeze_intervals(result)] == [
+        (2.5, 4.5)
+    ]
+    assert len(runner.calls) == 1
+
+
+def test_macroblocking_workspace_is_cleaned_after_timeout(segment):
+    class TimeoutAfterWriteRunner(FakeProcessRunner):
+        raw_path: Path | None = None
+
+        def run(self, command, *, timeout):
+            self.calls.append({"command": command, "timeout": timeout})
+            self.raw_path = Path(command[-1])
+            self.raw_path.write_bytes(bytes(range(32)) * 24)
+            raise ProcessTimeoutError(command, timeout)
+
+    runner = TimeoutAfterWriteRunner()
+    analyzer = MacroblockingAnalyzer(
+        MacroblockingAnalyzerConfig(
+            fusion_strategy=MacroblockingFusionStrategy.MAX_WITH_CONSISTENCY,
+            analysis_width=32,
+            analysis_height=24,
+            sampling_fps=1.0,
+            relative_scale_divisors=(8, 4, 2),
+        )
+    )
+    profile = VideoRealtimeProfile(
+        runner=runner,
+        enable_macroblocking=True,
+        macroblocking_analyzer=analyzer,
+    )
+
+    result = video_result(
+        profile,
+        segment,
+        frozenset({AnalysisRequirement.MACROBLOCKING_OBSERVATIONS}),
+    )
+
+    assert result.checked is False
+    assert result.timed_out is True
+    assert runner.raw_path is not None
+    assert not runner.raw_path.exists()
 
 
 def test_gap_is_terminal_without_ffmpeg(segment):

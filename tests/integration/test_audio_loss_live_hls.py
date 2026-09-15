@@ -57,7 +57,11 @@ def test_live_loops_are_deterministic_and_drain_queue():
     )
     if loop_count <= 0 or publish_speed <= 0 or validation_timeout <= 0:
         raise ValueError("Live validation controls must be > 0")
-    expected_alert_count = loop_count * 2 * 2
+    monitored_variant_count = 1
+    alerts_per_loop = 2  # OPEN, then RESOLVED.
+    expected_alert_count = (
+        loop_count * monitored_variant_count * alerts_per_loop
+    )
 
     redis_client = RedisClient(
         RedisSettings(
@@ -190,7 +194,7 @@ def test_live_loops_are_deterministic_and_drain_queue():
                 stable_id = alert.variant_stable_id
                 assert stable_id is not None
                 by_variant.setdefault(stable_id, []).append(alert)
-            assert len(by_variant) == 2
+            assert len(by_variant) == monitored_variant_count
             for variant_alerts in by_variant.values():
                 assert [item.state for item in variant_alerts] == (
                     ["OPEN", "RESOLVED"] * loop_count
@@ -210,9 +214,15 @@ def test_live_loops_are_deterministic_and_drain_queue():
             assert metrics["queue_depth"] == "0"
             assert metrics["dropped_work"] == "0"
             assert metrics["ffmpeg_timeout_total"] == "0"
-            assert metrics["audio_analysis_total"] == str(22 * loop_count * 2)
-            assert metrics["audio_loss_open_total"] == str(loop_count * 2)
-            assert metrics["audio_loss_resolved_total"] == str(loop_count * 2)
+            expected_analyses = 22 * loop_count * monitored_variant_count
+            expected_transitions = loop_count * monitored_variant_count
+            assert metrics["audio_analysis_total"] == str(expected_analyses)
+            assert metrics["audio_loss_open_total"] == str(
+                expected_transitions
+            )
+            assert metrics["audio_loss_resolved_total"] == str(
+                expected_transitions
+            )
             _, peak_bytes = tracemalloc.get_traced_memory()
             baseline = {
                 "wall_seconds": time.monotonic() - started,

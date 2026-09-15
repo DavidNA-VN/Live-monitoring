@@ -4,7 +4,15 @@ import argparse
 import json
 import shutil
 from pathlib import Path
+import sys
 from time import perf_counter
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_ROOT = PROJECT_ROOT / "src"
+for import_root in (PROJECT_ROOT, SRC_ROOT):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
 
 from models.analysis import AnalysisRequirement
 from playlist.master_parser import Variant
@@ -14,11 +22,11 @@ from profiles.video_realtime import VideoRealtimeProfile
 from scripts.generate_video_freeze_fixtures import generate_fixtures
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_FIXTURE_ROOT = PROJECT_ROOT / "hls_output" / "video_freeze_fixtures"
 
 
 def _segments(playlist: Path):
+    playlist = playlist.resolve()
     variant = Variant(
         id="benchmark",
         stable_id="benchmark",
@@ -114,7 +122,7 @@ def main() -> int:
     if shutil.which("ffmpeg") is None:
         parser.error("ffmpeg is required")
 
-    playlist = args.fixture_root / "freeze_5_2s" / "low" / "playlist.m3u8"
+    playlist = args.fixture_root / "freeze_cross_three_segments" / "low" / "playlist.m3u8"
     if not playlist.exists():
         generate_fixtures(args.fixture_root)
     segments = _segments(playlist)
