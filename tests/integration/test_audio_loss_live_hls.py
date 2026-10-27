@@ -18,6 +18,7 @@ from core.redis_client import RedisClient, RedisSettings
 from core.redis_keys import AlertRedisKeys, RedisNamespace, RuntimeRedisKeys
 from core.stream_supervisor import StreamSupervisor
 from models.alert import AlertEnvelope
+from models.admission import LiveAdmissionPolicy, StartupAdmissionMode
 from models.stream_config import StreamConfig
 from scripts.generate_audio_loss_fixtures import generate_fixtures
 from scripts.publish_live_hls import HLS_ROOT, publish
@@ -62,6 +63,7 @@ def test_live_loops_are_deterministic_and_drain_queue():
     expected_alert_count = (
         loop_count * monitored_variant_count * alerts_per_loop
     )
+    expected_analyses = 22 * loop_count * monitored_variant_count
 
     redis_client = RedisClient(
         RedisSettings(
@@ -139,6 +141,10 @@ def test_live_loops_are_deterministic_and_drain_queue():
                 audio_loss_duration=6.0,
                 max_concurrent_media_processes=2,
                 max_work_age_seconds=300.0,
+                admission_policy=LiveAdmissionPolicy(
+                    startup_mode=StartupAdmissionMode.FULL_SNAPSHOT,
+                    hard_lag_target_durations=1000.0,
+                ),
             )
             supervisor = StreamSupervisor(
                 session_factory=MonitoringSessionFactory(
@@ -176,6 +182,9 @@ def test_live_loops_are_deterministic_and_drain_queue():
                     len(alerts) == expected_alert_count
                     and publisher_done
                     and metrics.get("queue_depth") == "0"
+                    # An empty queue can precede the next playlist poll.
+                    and int(metrics.get("audio_analysis_total", "0"))
+                    >= expected_analyses
                 ):
                     break
                 time.sleep(0.25)
@@ -214,7 +223,6 @@ def test_live_loops_are_deterministic_and_drain_queue():
             assert metrics["queue_depth"] == "0"
             assert metrics["dropped_work"] == "0"
             assert metrics["ffmpeg_timeout_total"] == "0"
-            expected_analyses = 22 * loop_count * monitored_variant_count
             expected_transitions = loop_count * monitored_variant_count
             assert metrics["audio_analysis_total"] == str(expected_analyses)
             assert metrics["audio_loss_open_total"] == str(

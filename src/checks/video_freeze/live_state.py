@@ -26,6 +26,7 @@ from models.freeze import (
     VideoFreezeAlertRecoveryState,
     VideoFreezeAlertType,
     VideoFreezeDetectionResult,
+    VideoFreezeEventStatus,
     VideoFreezeLiveEvent,
     VideoFreezeSeverity,
 )
@@ -333,6 +334,12 @@ class RedisVideoFreezeEventStore:
             )
             if event is None:
                 raise RuntimeError("freeze recovery references a missing event")
+            event = replace(
+                event,
+                status=VideoFreezeEventStatus.RESOLVED,
+                detection_closed=True,
+                resolution_reason=reason,
+            )
             self.repository.queue_resolve(
                 pipeline, event=event, opening_notification=None,
                 resolution_severity=VideoFreezeSeverity.ALERT, reason=reason,

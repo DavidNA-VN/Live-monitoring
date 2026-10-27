@@ -45,3 +45,10 @@ tools/
 # Local benchmark output
 benchmark_results/
 .benchmark/
+
+# Keep research datasets and release archives outside the demo repository.
+datasets/
+mb-dataset/
+notebook mobilet-net-v1/
+*.ipynb
+*.zip

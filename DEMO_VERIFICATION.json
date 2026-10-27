@@ -1,0 +1,270 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "case": "healthy",
+      "dropped_media_segments_total": 0,
+      "expected": [],
+      "master_url": "http://127.0.0.1:55306/live_validation/healthy/master.m3u8",
+      "missing": [],
+      "observed": [],
+      "passed": true,
+      "stream_id": "fixture-healthy-69bb7f80",
+      "unexpected": [],
+      "variant_count": 1
+    },
+    {
+      "case": "black_screen",
+      "dropped_media_segments_total": 0,
+      "expected": [
+        [
+          "BLACK_SCREEN",
+          "OPEN"
+        ],
+        [
+          "BLACK_SCREEN",
+          "RESOLVED"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "OPEN"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "RESOLVED"
+        ]
+      ],
+      "master_url": "http://127.0.0.1:55306/live_validation/black_screen/master.m3u8",
+      "missing": [],
+      "observed": [
+        [
+          "BLACK_SCREEN",
+          "OPEN"
+        ],
+        [
+          "BLACK_SCREEN",
+          "RESOLVED"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "OPEN"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "RESOLVED"
+        ]
+      ],
+      "passed": true,
+      "stream_id": "fixture-black_screen-43f20be5",
+      "unexpected": [],
+      "variant_count": 1
+    },
+    {
+      "case": "audio_silence",
+      "dropped_media_segments_total": 0,
+      "expected": [
+        [
+          "AUDIO_LOSS",
+          "OPEN"
+        ],
+        [
+          "AUDIO_LOSS",
+          "RESOLVED"
+        ]
+      ],
+      "master_url": "http://127.0.0.1:55306/live_validation/audio_silence/master.m3u8",
+      "missing": [],
+      "observed": [
+        [
+          "AUDIO_LOSS",
+          "OPEN"
+        ],
+        [
+          "AUDIO_LOSS",
+          "RESOLVED"
+        ]
+      ],
+      "passed": true,
+      "stream_id": "fixture-audio_silence-dbf4fcbe",
+      "unexpected": [],
+      "variant_count": 1
+    },
+    {
+      "case": "audio_missing",
+      "dropped_media_segments_total": 0,
+      "expected": [
+        [
+          "AUDIO_LOSS",
+          "OPEN"
+        ]
+      ],
+      "master_url": "http://127.0.0.1:55306/live_validation/audio_missing/master.m3u8",
+      "missing": [],
+      "observed": [
+        [
+          "AUDIO_LOSS",
+          "OPEN"
+        ]
+      ],
+      "passed": true,
+      "stream_id": "fixture-audio_missing-489d4098",
+      "unexpected": [],
+      "variant_count": 1
+    },
+    {
+      "case": "video_freeze",
+      "dropped_media_segments_total": 0,
+      "expected": [
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "OPEN"
+        ],
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "RESOLVED"
+        ],
+        [
+          "VIDEO_FREEZE",
+          "OPEN"
+        ],
+        [
+          "VIDEO_FREEZE",
+          "RESOLVED"
+        ]
+      ],
+      "master_url": "http://127.0.0.1:55306/live_validation/video_freeze/master.m3u8",
+      "missing": [],
+      "observed": [
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "OPEN"
+        ],
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "RESOLVED"
+        ],
+        [
+          "VIDEO_FREEZE",
+          "OPEN"
+        ],
+        [
+          "VIDEO_FREEZE",
+          "RESOLVED"
+        ]
+      ],
+      "passed": true,
+      "stream_id": "fixture-video_freeze-ad6daff0",
+      "unexpected": [],
+      "variant_count": 1
+    },
+    {
+      "case": "macroblocking",
+      "dropped_media_segments_total": 0,
+      "expected": [
+        [
+          "MACROBLOCKING",
+          "OPEN"
+        ],
+        [
+          "MACROBLOCKING",
+          "RESOLVED"
+        ]
+      ],
+      "master_url": "http://127.0.0.1:55306/live_validation/macroblocking/master.m3u8",
+      "missing": [],
+      "observed": [
+        [
+          "MACROBLOCKING",
+          "OPEN"
+        ],
+        [
+          "MACROBLOCKING",
+          "RESOLVED"
+        ]
+      ],
+      "passed": true,
+      "stream_id": "fixture-macroblocking-58d6ac4f",
+      "unexpected": [],
+      "variant_count": 1
+    },
+    {
+      "case": "combined",
+      "dropped_media_segments_total": 0,
+      "expected": [
+        [
+          "AUDIO_LOSS",
+          "OPEN"
+        ],
+        [
+          "AUDIO_LOSS",
+          "RESOLVED"
+        ],
+        [
+          "MACROBLOCKING",
+          "OPEN"
+        ],
+        [
+          "MACROBLOCKING",
+          "RESOLVED"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "OPEN"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "RESOLVED"
+        ],
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "OPEN"
+        ],
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "RESOLVED"
+        ]
+      ],
+      "master_url": "http://127.0.0.1:55306/live_validation/combined/master.m3u8",
+      "missing": [],
+      "observed": [
+        [
+          "AUDIO_LOSS",
+          "OPEN"
+        ],
+        [
+          "AUDIO_LOSS",
+          "RESOLVED"
+        ],
+        [
+          "MACROBLOCKING",
+          "OPEN"
+        ],
+        [
+          "MACROBLOCKING",
+          "RESOLVED"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "OPEN"
+        ],
+        [
+          "REPEATED_BLACK_SCREEN",
+          "RESOLVED"
+        ],
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "OPEN"
+        ],
+        [
+          "REPEATED_VIDEO_FREEZE",
+          "RESOLVED"
+        ]
+      ],
+      "passed": true,
+      "stream_id": "fixture-combined-a588069d",
+      "unexpected": [],
+      "variant_count": 1
+    }
+  ],
+  "schema_version": "1.0"
+}

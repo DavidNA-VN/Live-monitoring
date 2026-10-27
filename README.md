@@ -1,243 +1,151 @@
 # Live HLS Media Monitor
 
-Hệ thống giám sát chất lượng luồng video **HLS trực tiếp (Live HLS)** theo thời gian thực (near real-time), tự động phát hiện các bất thường về hình ảnh và âm thanh, cung cấp bảng điều khiển (Web Dashboard), REST API, WebSocket và cơ chế phân phối cảnh báo qua Redis.
+Hệ thống giám sát lỗi nội dung truyền hình HLS, phát hiện **đen hình, đứng hình và mất tiếng**, hiển thị cảnh báo trên dashboard kèm link segment bị ảnh hưởng.
 
----
+Đây là **bản demo báo cáo ngày 27/10/2026**, dùng cùng source đã chọn lọc để gửi mentor, bao gồm bản sửa trạng thái freeze sau phục hồi. Phạm vi kiểm chứng là một stream và variant chất lượng cao nhất. Các thử nghiệm macroblocking offline, dataset và notebook không thuộc phiên bản này.
 
-## 📌 Tính năng nổi bật
+## Hình ảnh hoạt động
 
-### 1. Giám sát đa dạng lỗi phát sóng (Anomaly Detection)
-- **Black Screen (Màn hình đen)**: Phát hiện màn hình đen liên tục hoặc chớp nháy lặp lại (repeated blackout) theo ngưỡng thời gian và luminance (`blackdetect`).
-- **Audio Loss / Silence (Mất tiếng / Khoảng lặng)**: Phát hiện suy giảm âm lượng nghiêm trọng hoặc tắt tiếng liên tục trên các track âm thanh muxed (`silencedetect`).
-- **Video Freeze (Đứng hình)**: Phát hiện khung hình bị treo hoặc lặp lại liên tục với cơ chế lọc nhiễu khung hình (`freezedetect`).
-- **Macroblocking (Vỡ hình / Khảm hạt)**: Thuật toán phân tích cấu trúc lưới điểm ảnh đa tỷ lệ (Multi-scale Grid Score, Difference Maps, Window Scale Fusion) để phát hiện vỡ hình do nén hoặc mất gói tin mạng.
+### Cảnh báo black-screen
 
-### 2. Quản lý vòng đời cảnh báo (Alert Lifecycle & State Machine)
-- Quản lý trạng thái sự cố chặt chẽ: `OPEN` (bắt đầu lỗi) ➔ `UPDATE` (cập nhật diễn biến) ➔ `RESOLVED` (hồi phục bình thường).
-- Cơ chế **Repeated Alerts** cảnh báo các lỗi chớp nháy gián đoạn mà không tạo alert bão hòa.
-- Lưu trữ Outbox và Event Stream độc lập trên **Redis Streams**, đảm bảo tính bất biến và không thất thoát sự kiện.
+![Dashboard hiển thị cảnh báo black-screen OPEN và RESOLVED cùng phạm vi segment](assets/screenshots/black-screen-alert.png)
 
-### 3. Tối ưu hóa hiệu năng & Pipeline phân tích
-- **Shared Decode Pipeline**: Phân tích đồng thời nhiều loại lỗi hình ảnh (Black Screen, Video Freeze, Macroblocking) trên một lần giải mã duy nhất, giảm tải CPU/RAM tối đa.
-- **Process Resource Budgeting (`MediaProcessBudget`)**: Giới hạn số lượng tiến trình FFmpeg chạy đồng thời ở cả cấp độ luồng lẫn cấp độ toàn service, ngăn ngừa nghẽn tài nguyên.
-- **Adaptive Catch-Up Admission Mode**: Tự động cân bằng giữa độ trễ phát sóng (live-edge lag) và độ bao phủ kiểm tra khi mạng chậm hoặc origin trả segment dồn toa.
+Nhật ký hiển thị sự kiện `BLACK_SCREEN` với trạng thái `OPEN` và `RESOLVED`, variant 360p cùng link segment đầu/cuối. Ảnh chụp khi video đã phục hồi, vì vậy player đang hiển thị hình bình thường trong khi nhật ký vẫn lưu sự cố trước đó.
 
-### 4. Kiến trúc Microservice & Điều khiển tập trung
-- **Monitoring Worker**: Daemon worker xử lý background độc lập, hỗ trợ Desired State Recovery (tự khôi phục các luồng khi worker khởi động lại) và Worker Heartbeat.
-- **Presentation API (FastAPI)**: RESTful API chuẩn hóa theo JSON Schema DTO, hỗ trợ WebSocket đẩy cảnh báo trực tiếp theo từng stream.
-- **Realtime Web Dashboard**: Giao diện Dark Mode + Glassmorphism hiện đại, tích hợp trình phát video trực tiếp HLS.js, thanh đo Telemetry (FPS, Bitrate, Resolution) và Event Log trực quan.
+### Theo dõi một luồng live
 
----
+![Dashboard theo dõi một luồng live 1080p, hiển thị trạng thái và telemetry](assets/screenshots/healthy-live-monitoring.png)
 
-## 🛠 Yêu cầu môi trường
+Phiên giám sát trong ảnh đang ở trạng thái `RUNNING`, hiển thị thông tin video và tải xử lý. Các số liệu là ảnh chụp tại một thời điểm, không đại diện cho năng lực trên mọi kênh hoặc cấu hình máy.
 
-- **Python**: 3.10 trở lên (khuyến nghị 3.11 hoặc 3.12/3.13)
-- **FFmpeg & FFprobe**: Đã cài đặt và có trong biến môi trường `PATH`
-- **Redis**: Phiên bản 7.0+ (khuyến nghị chạy bằng Docker)
+## Chức năng chính
 
-Kiểm tra trên terminal:
+| Chức năng | Cách xử lý |
+|---|---|
+| Black-screen | `blackdetect`, nối event liên tục và đếm các event ngắn đủ điều kiện |
+| Video freeze | `freezedetect`, loại phần giao với black, so ảnh biên khi nối qua segment |
+| Audio-loss | `silencedetect`, phân biệt im lặng và thiếu audio track |
+| Điều khiển stream | START, PAUSE, RESUME, STOP qua REST API |
+| Cảnh báo | Redis Streams và WebSocket, có trạng thái và phạm vi segment |
+| Quan sát vận hành | Trạng thái worker, queue lag, coverage gap và dropped segments |
 
-```powershell
-python --version
-ffmpeg -version
-ffprobe -version
-docker --version
+Module macroblocking live dạng lưới được giữ vì đã tích hợp trong baseline và có fixture kiểm thử. Khi demo ba bệnh chính, bỏ chọn **Macroblocking**. Khả năng nhận biết macroblocking trên video quay màn hình hoặc tái mã hóa còn giới hạn.
+
+## Luồng xử lý
+
+```mermaid
+flowchart LR
+    UI[Dashboard] --> API[FastAPI REST]
+    API --> CMD[Redis command stream]
+    CMD --> WORKER[Monitoring Worker]
+    CDN[HLS từ CDN] --> WORKER
+    WORKER --> MEDIA[FFmpeg và detector]
+    MEDIA --> EVENT[Reducer và policy]
+    EVENT --> OUTBOX[Redis event và alert outbox]
+    OUTBOX --> WS[FastAPI WebSocket]
+    WS --> UI
 ```
 
----
+Worker chọn variant video chất lượng cao nhất, theo dõi playlist và xử lý segment mới. Các phép kiểm tra video dùng chung lần giải mã của cùng segment. Reducer nối bằng chứng thành event; policy quyết định khi nào phát cảnh báo. Redis chuyển lệnh và lưu kết quả, còn worker lấy media trực tiếp từ nguồn HLS.
 
-## 🚀 Cài đặt & Khởi chạy
+## Quy tắc mặc định
 
-### 1. Clone mã nguồn & Cài đặt thư viện
+| Bệnh | Điều kiện mở cảnh báo | Điều kiện phục hồi |
+|---|---|---|
+| Black-screen liên tục | Event đen hình từ 60 giây | Một segment khỏe đầy đủ |
+| Freeze liên tục | Event đứng hình từ 60 giây | Một segment khỏe đầy đủ |
+| Repeated black/freeze | Ba event ngắn đủ điều kiện trong cửa sổ 120 giây | Một segment khỏe đầy đủ |
+| Audio-loss | Mất âm từ 30 giây, ngưỡng silence mặc định −60 dBFS | Có bằng chứng âm thanh quay lại |
+
+Event ngắn đóng góp vào repeated phải kéo dài ít nhất một reference segment và dưới 60 giây. Thiếu dữ liệu hoặc decode lỗi không chứng minh media đã phục hồi. Event thô có thể được lưu mà chưa đủ điều kiện phát alert.
+
+## Cài đặt
+
+- Python **3.13**, đã kiểm thử với 3.13.9.
+- FFmpeg và FFprobe có trong `PATH`.
+- Redis 8, có thể chạy bằng Docker.
+- Node.js 22 nếu chạy bộ kiểm thử JavaScript hoặc runner MVP có frontend test.
+- Trình duyệt cần Internet để tải HLS.js từ CDN. Font giao diện cũng dùng dịch vụ ngoài.
 
 ```powershell
 git clone https://github.com/DavidNA-VN/Live-monitoring.git
 cd Live-monitoring
-
-# Tạo và kích hoạt môi trường ảo
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
-# Cập nhật pip và cài đặt dependencies
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+ffmpeg -version
+ffprobe -version
 ```
 
-### 2. Khởi chạy Redis
+Nếu chỉ chạy ứng dụng, có thể cài `requirements.txt` thay cho `requirements-dev.txt`.
 
-Chạy Redis 7 bằng Docker:
+## Chạy demo
+
+Hướng dẫn đầy đủ nằm trong [DEMO_GUIDE.md](DEMO_GUIDE.md), gồm cài Redis, tạo sample, khởi động bốn terminal, URL từng case và kết quả kỳ vọng.
 
 ```powershell
-# Tạo container lần đầu
-docker run -d --name media-redis -p 6379:6379 redis:7-alpine
-
-# Các lần sau chỉ cần start lại
-docker start media-redis
+# Tạo sample HLS một lần, sau khi đã cài FFmpeg.
+python .\scripts\generate_monitoring_test_cases.py --reset
 ```
 
-*Mặc định service sử dụng `redis://localhost:6379/0`. Bạn có thể thay đổi thông qua biến môi trường `$env:REDIS_URL`.*
-
----
-
-## 💻 Hướng dẫn vận hành
-
-### Mô hình 1: Chạy Full-Stack (Web Dashboard + Redis Worker) — *Khuyến nghị*
-
-Mô hình hoàn chỉnh mô phỏng môi trường thực tế: Giao diện web gửi lệnh qua API, API lưu vào Redis Gateway, Worker tiêu thụ lệnh và tiến hành phân tích HLS.
-
-**Bước 1: Khởi động FastAPI & Web Dashboard (Terminal 1)**
-```powershell
-$env:MONITORING_API_MODE="redis"
-$env:REDIS_URL="redis://localhost:6379/0"
-python -m uvicorn src.presentation.api.main:app --host 0.0.0.0 --port 8080 --reload
-```
-
-**Bước 2: Khởi động Monitoring Worker Daemon (Terminal 2)**
-```powershell
-.\.venv\Scripts\python.exe src\live_main.py `
-  --command-worker `
-  --enable-video-freeze `
-  --enable-macroblocking `
-  --worker-id "worker-01"
-```
-
-**Bước 3: Trải nghiệm trên Dashboard**
-1. Truy cập trình duyệt: `http://localhost:8080`.
-2. Nhập `Stream ID` (ví dụ: `channel-01`) và `Master URL (.m3u8)`.
-3. Tích chọn các bộ kiểm tra mong muốn (`Freeze`, `Macroblocking`).
-4. Bấm **Connect** để phát video và theo dõi các cảnh báo trực tiếp từ Event Log.
-
----
-
-### Mô hình 2: Chạy Web Dashboard độc lập (Chế độ `fake` Demo)
-
-Phù hợp để kiểm thử giao diện frontend và luồng WebSocket mà không cần cài Redis hay chạy Worker phân tích:
+API và worker phải cùng Redis URL và prefix. Khi API chạy đúng cấu hình:
 
 ```powershell
-$env:MONITORING_API_MODE="fake"
-$env:ENABLE_FAKE_GENERATOR="true"
-python -m uvicorn src.presentation.api.main:app --host 0.0.0.0 --port 8080 --reload
+Invoke-RestMethod http://127.0.0.1:8080/health/ready
 ```
-*Truy cập `http://localhost:8080`, hệ thống sẽ tự động phát sinh các cảnh báo giả lập sau khi kết nối.*
 
----
+Kết quả cần có `status=ready`, `mode=redis`. Dashboard ở **http://127.0.0.1:8080**. Dừng worker trước khi tắt Redis để tránh lỗi timeout do kết nối bị ngắt.
 
-### Mô hình 3: Chạy trực tiếp từ CLI (Standalone Runner)
+## Kiểm thử đã thực hiện
 
-Phù hợp cho kiểm tra nhanh một luồng HLS cụ thể và in log cảnh báo ra terminal:
+Source demo đã được giải nén sang thư mục riêng và kiểm thử với Redis cùng FFmpeg:
+
+- **906 test Python pass**, gồm các test Redis và media opt-in.
+- **15 test JavaScript pass** cho dashboard.
+- **7/7 fixture** qua worker thật, một variant mỗi case, không dropped segment trong lượt kiểm chứng.
+- Kiểm tra chính xác số alert, tính duy nhất của alert ID, payload public và link segment.
+
+| Fixture | Alert nội dung trong một vòng đầy đủ |
+|---|---:|
+| Healthy | 0 |
+| Black-screen | 4 |
+| Freeze | 4 |
+| Audio silence | 2 |
+| Audio missing | 1 OPEN |
+| Macroblocking tổng hợp | 2 |
+| Combined, bật cả bốn bệnh | 8 |
+
+Các số trên không tính `RUNTIME_HEALTH`. Sample audio missing chưa có âm thanh quay lại nên không tự phát recovery. Kết quả fixture không phải cam kết độ chính xác hay throughput với mọi nguồn HLS.
 
 ```powershell
-.\.venv\Scripts\python.exe src\live_main.py `
-  --url "https://example.com/live/master.m3u8" `
-  --stream-id "channel-01" `
-  --console `
-  --enable-video-freeze `
-  --enable-macroblocking
+python -m pytest -q
+
+# Bật thêm các bài media live và audio loop dài.
+$env:RUN_WORKER_MEDIA_E2E = "1"
+$env:RUN_PHASE6_LIVE = "1"
+python -m pytest -q
 ```
 
-- `--console`: In trực tiếp các sự kiện `OPEN`, `UPDATE`, `RESOLVED` ra màn hình dòng lệnh.
-- Nhấn `Ctrl+C`: Hệ thống sẽ graceful shutdown, hoàn tất nốt các segment đang decode dở trước khi thoát.
+Xem thêm [RELEASE_VERIFICATION.md](RELEASE_VERIFICATION.md) và [DEMO_VERIFICATION.json](DEMO_VERIFICATION.json). URL localhost trong báo cáo là địa chỉ server tạm của lượt test.
 
----
-
-### Mô hình 4: Kiểm thử với HLS giả lập nội bộ (Local Fixture)
-
-Nếu chưa có luồng live ngoài Internet, bạn có thể tạo luồng HLS từ một video `.mp4` có sẵn:
-
-```powershell
-# 1. Đặt video nguồn vào source_videos/
-mkdir source_videos -ErrorAction SilentlyContinue
-
-# 2. Cắt video thành HLS
-python scripts\mp4_to_hls.py
-
-# 3. Phục vụ HLS qua HTTP server
-python scripts\serve_hls.py
-```
-
-Ở một terminal khác, kết nối worker hoặc dashboard tới URL local vừa sinh (ví dụ: `http://127.0.0.1:8000/sample/master.m3u8`).
-
----
-
-## ⚙️ Bảng tham số cấu hình chính (CLI Arguments)
-
-| Tham số | Mặc định | Ý nghĩa |
-| :--- | :---: | :--- |
-| `--url` | `None` | URL HLS Master Playlist khởi tạo ban đầu |
-| `--stream-id` | `None` | Định danh định tuyến nghiệp vụ của luồng (Business Identity) |
-| `--command-worker` | `False` | Bật chế độ daemon nhận lệnh điều khiển từ Redis Gateway |
-| `--disable-black-screen` | `False` | Tắt bộ phát hiện màn hình đen |
-| `--disable-audio-loss` | `False` | Tắt bộ phát hiện mất âm thanh |
-| `--enable-video-freeze` | `False` | Bật bộ phát hiện đứng hình |
-| `--enable-macroblocking` | `False` | Bật bộ phát hiện vỡ khối (macroblocking) |
-| `--freeze-noise-db` | `-60.0` | Ngưỡng dung sai nhiễu đóng băng hình ảnh (dB) |
-| `--freeze-alert-duration` | `60.0` | Thời gian đứng hình liên tục tối thiểu để kích hoạt alert (giây) |
-| `--silence-threshold-dbfs`| `-60.0` | Ngưỡng âm lượng tối đa xem là im lặng (dBFS) |
-| `--audio-loss-duration` | `30.0` | Thời gian im lặng liên tục để kích hoạt alert (giây) |
-| `--max-media-processes` | `4` | Giới hạn số tiến trình FFmpeg chạy đồng thời cho mỗi luồng |
-| `--max-service-media-processes` | `8` | Giới hạn số tiến trình FFmpeg chạy đồng thời toàn bộ worker |
-| `--startup-mode` | `bounded_history`| Cơ chế nhận diện segment khi khởi động (`bounded_history` hoặc `full_snapshot`) |
-| `--startup-lookback-segments` | `4` | Số lượng segment mới nhất nạp vào khi mới khởi động |
-| `--variant-selection` | `highest_quality`| Chiến lược chọn profile biến thể (`highest_quality`, `all`, `representative`, `explicit`) |
-
----
-
-## 📡 API & WebSocket Contracts
-
-Tầng Presentation tuân thủ các schema định dạng dữ liệu trong thư mục `contracts/`:
-
-- **POST** `/api/v1/streams/{stream_id}/start`: Bắt đầu giám sát luồng với cấu hình `StreamConfigDTO`.
-- **POST** `/api/v1/streams/{stream_id}/stop`: Dừng giám sát luồng.
-- **POST** `/api/v1/streams/{stream_id}/pause` / `resume`: Tạm dừng hoặc tiếp tục giám sát.
-- **GET** `/api/v1/streams/{stream_id}/status`: Đọc trạng thái runtime (`RuntimeStatusDTO`), bao gồm sức khỏe worker, active variants, queue lag.
-- **GET** `/api/v1/streams/{stream_id}/events`: Đọc lịch sử cảnh báo gần nhất (`AlertDTO[]`).
-- **GET** `/api/v1/commands/{command_id}`: Kiểm tra tiến độ và kết quả thực thi lệnh (`CommandResultDTO`).
-- **WebSocket** `/api/v1/ws/streams/{stream_id}`: Kênh nhận thông điệp cảnh báo thời gian thực (`AlertMessageDTO`).
-
----
-
-## 🧪 Kiểm thử (Testing)
-
-Chạy bộ unit test và integration test với `pytest`:
-
-```powershell
-# Chạy toàn bộ test
-.venv\Scripts\python.exe -m pytest -q -rs
-
-# Kiểm tra riêng từng module
-.venv\Scripts\python.exe -m pytest tests/core/test_phase2_identity_boundary.py
-.venv\Scripts\python.exe -m pytest tests/detectors/test_macroblocking_analyzer.py
-```
-
-*Lưu ý: Các bài kiểm thử tích hợp Redis yêu cầu Redis đang chạy (hoặc cấu hình qua biến `REDIS_TEST_URL`). Các bài kiểm thử FFmpeg yêu cầu FFmpeg khả dụng trong môi trường.*
-
----
-
-## 📂 Cấu trúc mã nguồn
+## Cấu trúc source
 
 ```text
-media-monitor/
-├── contracts/               # JSON Schema chuẩn hóa cho API, Command, Alert & Status
-├── scripts/                 # Bộ script hỗ trợ (tạo fixture, benchmark, publish HLS)
-├── src/
-│   ├── app/                 # Worker runtime, command consumers, state recovery & heartbeats
-│   ├── checks/              # Quản lý sự kiện & reducer từng loại lỗi (black_screen, freeze, macroblocking, audio_loss)
-│   ├── core/                # Playlist parsing, admission policy, scheduling, shared decode, Redis client
-│   ├── detectors/           # Thuật toán phân tích FFmpeg/NumPy cho từng loại lỗi
-│   ├── models/              # Dataclass & Entity models nội bộ
-│   ├── presentation/        # FastAPI REST/WebSocket endpoints & Web Dashboard UI
-│   │   ├── api/             # API routes, composition, dependency injection, settings
-│   │   └── static/          # Dashboard frontend (HTML, CSS, JS)
-│   └── live_main.py         # Entrypoint chính cho CLI Runner và Worker Daemon
-├── tests/                   # Bộ test tự động (Unit, Integration, E2E)
-├── requirements.txt         # Danh sách gói thư viện Python
-└── README.md                # Tài liệu hướng dẫn dự án
+src/app/              Worker, xử lý command và lắp ghép thành phần
+src/core/             Session, supervisor, scheduling, trạng thái Redis
+src/profiles/         FFmpeg và parser bằng chứng media
+src/detectors/        Diễn giải bằng chứng cho từng bệnh
+src/policies/         Quy tắc cảnh báo
+src/checks/           Event reducer, repository, publisher
+src/presentation/     REST API, WebSocket và dashboard
+scripts/              Tạo fixture, phát HLS và kiểm thử demo
+tests/                Bộ kiểm thử tương ứng phiên bản demo
+contracts/            JSON schema dữ liệu public
+assets/screenshots/   Ảnh chụp hệ thống
 ```
 
----
+## Phạm vi và giới hạn
 
-## 🛡 Nguyên tắc vận hành Production
+Mục tiêu của bản này là demo một stream, một variant chất lượng cao nhất. Player trình duyệt và detector có bộ đệm/nhịp xử lý riêng nên ảnh đang xem và thời điểm alert đến có thể lệch nhau. Khi quá tải, chính sách admission có thể bỏ công việc cũ để bảo vệ live edge và ghi nhận thiếu coverage.
 
-1. **Tính bất biến của Segment (Immutable Segments)**: Hệ thống sử dụng metadata trên manifest (`media_revision` fingerprint) để xác định danh tính phân tích của segment nhằm tối ưu hoá I/O, không tải trước hay băm binary bytes tại admission layer. Origin/CDN phục vụ luồng live cần tuân thủ quy chuẩn segment đã phát hành là bất biến.
-2. **Quản lý Process An toàn**: Luôn đặt ngưỡng `--max-media-processes` và `--max-service-media-processes` phù hợp với số nhân CPU của máy chủ để tránh cạn kiệt tài nguyên hệ điều hành.
-3. **Bảo mật**: Không commit live URLs chứa token bảo mật, file cấu hình `.env`, video dung lượng lớn hoặc dữ liệu Redis dump vào kho mã nguồn.
+Giám sát nhiều kênh, bổ sung bệnh audio và tăng độ chính xác macroblocking cần benchmark và triển khai tiếp. Source nghiên cứu offline, dataset, notebook, video sinh ra và tài liệu phase nội bộ được giữ ngoài repository demo.

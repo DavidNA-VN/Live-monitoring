@@ -1,0 +1,22 @@
+{
+  "release": "media-monitor-demo-2026-10-27",
+  "base_commit": "fc2d510da211965499ea5183f3c3945d7ea27aa4",
+  "base_branch": "demo/current-stable",
+  "source_policy": "Committed demo source plus verified freeze recovery and media test fixes",
+  "verified_fix_overlays": [
+    "src/checks/video_freeze/live_state.py",
+    "tests/e2e/test_mvp_api_worker_e2e.py",
+    "tests/e2e/test_worker_media_e2e.py",
+    "tests/integration/test_audio_loss_live_hls.py",
+    "tests/integration/test_video_freeze_redis.py"
+  ],
+  "primary_demo_checks": [
+    "black_screen",
+    "video_freeze",
+    "audio_loss"
+  ],
+  "optional_baseline_check": "macroblocking periodic-grid live detector",
+  "offline_macroblocking_research_included": false,
+  "generated_media_included": false,
+  "tested_python": "3.13.9"
+}

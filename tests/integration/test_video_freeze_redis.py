@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from checks.video_freeze.event_codec import VideoFreezeEventCodec
 from checks.video_freeze.live_state import RedisVideoFreezeEventStore
 from checks.video_freeze.redis_keys import VideoFreezeRedisKeys
 from core.redis_client import RedisClient, RedisSettings
@@ -144,6 +145,14 @@ def test_continuous_open_resolution_and_retry_are_idempotent(
     ]
     assert len({item.event_id for item in alerts}) == 1
     assert len({item.alert_id for item in alerts}) == 2
+    raw = client.client.get(
+        keys.freeze.event("internal-stream", first.variant_stable_id, alerts[0].event_id)
+    )
+    assert raw is not None
+    persisted = VideoFreezeEventCodec.decode(raw)
+    assert persisted.status.value == "resolved"
+    assert persisted.detection_closed is True
+    assert persisted.resolution_reason == "healthy_segment_confirmed"
 
 
 def test_timeline_reset_and_variants_never_reuse_state(redis_context):

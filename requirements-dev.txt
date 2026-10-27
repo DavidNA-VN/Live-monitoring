@@ -1,2 +1,2 @@
 -r requirements.txt
-psutil>=6.0,<8.0
+pytest==9.1.1

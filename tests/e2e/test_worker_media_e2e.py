@@ -59,13 +59,13 @@ def test_black_screen_alert_end_to_end(redis_context, probe):
                 publish(**{
                 "source": source_dir,
                 "output": live_dir,
-                "window_size": 5,
-                "retention_segments": 8,
+                "window_size": 128,
+                "retention_segments": 192,
                 "start_sequence": 0,
                 "loop": True,
                 "reset": True,
                 "max_publishes": None,
-                "speed": 6.0,
+                "speed": 3.0,
                 "stop_event": publisher_stop,
                 })
             except BaseException as exc:
@@ -108,6 +108,15 @@ def test_black_screen_alert_end_to_end(redis_context, probe):
                 "schema_version": "1.0",
                 "stream_id": stream_id,
                 "master_url": master_url,
+                "admission": {
+                    "startup_mode": "full_snapshot",
+                    "startup_lookback_segments": 4,
+                    "soft_lag_target_durations": 2.0,
+                    "recovery_lag_target_durations": 1.5,
+                    "hard_lag_target_durations": 1000.0,
+                    "live_edge_retention_segments": 2,
+                    "transition_cycles": 3,
+                },
                 "checks": {
                     "black_screen": {"enabled": True},
                     "audio_loss": {
