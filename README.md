@@ -2,7 +2,6 @@
 
 Hệ thống giám sát lỗi nội dung truyền hình HLS, phát hiện **đen hình, đứng hình và mất tiếng**, hiển thị cảnh báo trên dashboard kèm link segment bị ảnh hưởng.
 
-Đây là **bản demo báo cáo ngày 27/10/2026**, dùng cùng source đã chọn lọc để gửi mentor, bao gồm bản sửa trạng thái freeze sau phục hồi. Phạm vi kiểm chứng là một stream và variant chất lượng cao nhất. Các thử nghiệm macroblocking offline, dataset và notebook không thuộc phiên bản này.
 
 ## Hình ảnh hoạt động
 
@@ -16,7 +15,7 @@ Nhật ký hiển thị sự kiện `BLACK_SCREEN` với trạng thái `OPEN` v�
 
 ![Dashboard theo dõi một luồng live 1080p, hiển thị trạng thái và telemetry](assets/screenshots/healthy-live-monitoring.png)
 
-Phiên giám sát trong ảnh đang ở trạng thái `RUNNING`, hiển thị thông tin video và tải xử lý. Các số liệu là ảnh chụp tại một thời điểm, không đại diện cho năng lực trên mọi kênh hoặc cấu hình máy.
+Phiên giám sát trong ảnh đang ở trạng thái `RUNNING`, hiển thị thông tin video và tải xử lý. 
 
 ## Chức năng chính
 
